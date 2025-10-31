@@ -1,0 +1,72 @@
+{
+  "name": "Schools - Get Rules (ADMIN)",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "schools/rules",
+        "responseMode": "lastNode"
+      },
+      "id": "Webhook_GetRules",
+      "name": "Webhook /schools/rules (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\n\nfunction unauthorized(message, code) {\n  return [{ json: { statusCode: 401, message, error: code } }];\n}\nfunction forbidden(message) {\n  return [{ json: { statusCode: 403, message, error: 'FORBIDDEN' } }];\n}\n\nconst header = this.getHeader('authorization');\nif (!header || !header.startsWith('Bearer ')) return unauthorized('Token ausente.', 'TOKEN_MISSING');\n\nconst token = header.replace(/^Bearer\\s+/i, '').trim();\nconst [h, p, s] = token.split('.');\nif (!h || !p || !s) return unauthorized('Token malformado.', 'TOKEN_MALFORMED');\n\nconst recalculated = crypto.createHmac('sha256', process.env.JWT_SECRET).update(`${h}.${p}`).digest('base64url');\nif (s !== recalculated) return unauthorized('Assinatura inválida.', 'TOKEN_INVALID_SIGNATURE');\n\nconst payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));\nif (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return unauthorized('Token expirado.', 'TOKEN_EXPIRED');\n\nif (payload.role !== 'ADMIN') return forbidden('Acesso negado. Somente administradores.');\n\nreturn [{ json: { userId: payload.userId, role: payload.role, schoolId: payload.schoolId, statusCode: 200 } }];"
+      },
+      "id": "Function_VerifyAdminJWT_Get",
+      "name": "VerifyAdminJWT",
+      "type": "n8n-nodes-base.function",
+      "position": [550, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const schoolId = $json.schoolId;\nif (!schoolId) {\n  return [{ json: { statusCode: 400, message: 'schoolId não informado no token.' } }];\n}\n\nconst query = `\n  SELECT id, rule_name AS \"ruleName\", marks_to_award AS \"marksToAward\"\n  FROM school_rules\n  WHERE school_id = $1\n  ORDER BY created_at DESC;\n`;\n\nreturn [{ json: { sql: query, values: [schoolId] } }];"
+      },
+      "id": "Function_BuildQuery_GetRules",
+      "name": "Build SQL (GET Rules)",
+      "type": "n8n-nodes-base.function",
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{$json[\"sql\"]}}",
+        "additionalFields": {
+          "queryParams": "={{$json[\"values\"]}}"
+        }
+      },
+      "id": "Postgres_Exec_GetRules",
+      "name": "Postgres - Get Rules",
+      "type": "n8n-nodes-base.postgres",
+      "position": [1250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "__CRED_POSTGRES_ID__",
+          "name": "MarkDB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "responseBody": "={{$json[\"data\"] || []}}",
+        "responseCode": "={{$json[\"statusCode\"] || 200}}"
+      },
+      "id": "Respond_GetRules",
+      "name": "Respond /schools/rules (GET)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1600, 300]
+    }
+  ],
+  "connections": {
+    "Webhook /schools/rules (GET)": { "main": [ [{ "node": "VerifyAdminJWT", "type": "main", "index": 0 }] ] },
+    "VerifyAdminJWT": { "main": [ [{ "node": "Build SQL (GET Rules)", "type": "main", "index": 0 }] ] },
+    "Build SQL (GET Rules)": { "main": [ [{ "node": "Postgres - Get Rules", "type": "main", "index": 0 }] ] },
+    "Postgres - Get Rules": { "main": [ [{ "node": "Respond /schools/rules (GET)", "type": "main", "index": 0 }] ] }
+  },
+  "settings": { "timezone": "America/Sao_Paulo" },
+  "tags": ["Schools", "Rules", "GET", "Admin", "RBAC"]
+}

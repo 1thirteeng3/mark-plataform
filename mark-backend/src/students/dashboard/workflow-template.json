@@ -1,0 +1,101 @@
+{
+  "name": "Mark :: Students :: Dashboard (GET)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "students/dashboard",
+        "method": "GET"
+      },
+      "id": "Webhook_StudentsDashboard",
+      "name": "Webhook - /students/dashboard (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\n\nfunction unauthorized(message) { return [{ json: { statusCode: 401, error: 'UNAUTHORIZED', message } }]; }\nfunction forbidden(message) { return [{ json: { statusCode: 403, error: 'FORBIDDEN', message } }]; }\n\nconst header = this.getHeader('authorization');\nif (!header || !header.startsWith('Bearer ')) return unauthorized('Token ausente.');\nconst token = header.split(' ')[1];\nconst [h, p, s] = token.split('.');\nif (!h || !p || !s) return unauthorized('Token malformado.');\n\nconst expected = crypto.createHmac('sha256', process.env.JWT_SECRET).update(`${h}.${p}`).digest('base64url');\nif (s !== expected) return unauthorized('Token inválido.');\n\nconst payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));\nif (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return unauthorized('Token expirado.');\nif (payload.role !== 'STUDENT') return forbidden('Acesso negado. Somente alunos.');\n\nreturn [{ json: { studentId: payload.userId, schoolId: payload.schoolId, role: payload.role, statusCode: 200 } }];"
+      },
+      "id": "Function_VerifyStudentJWT",
+      "name": "Function - Verify Student JWT",
+      "type": "n8n-nodes-base.function",
+      "position": [350, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, marks_balance AS balance FROM students WHERE user_id = $1 AND school_id = $2;",
+        "values": "[{\"name\":\"$1\",\"value\":\"={{$json[\\\"studentId\\\"]}}\"},{\"name\":\"$2\",\"value\":\"={{$json[\\\"schoolId\\\"]}}\"}]"
+      },
+      "id": "Postgres_LoadStudentProfile",
+      "name": "Postgres - Load Student Profile",
+      "type": "n8n-nodes-base.postgres",
+      "credentials": { "postgres": "Mark Postgres" },
+      "position": [600, 250]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, type, amount, description, created_at AS \"createdAt\" FROM ledger_transactions WHERE student_id = $1 ORDER BY created_at DESC LIMIT 10;",
+        "values": "[{\"name\":\"$1\",\"value\":\"={{$json[\\\"studentId\\\"]}}\"}]"
+      },
+      "id": "Postgres_LoadRecentTransactions",
+      "name": "Postgres - Load Recent Transactions",
+      "type": "n8n-nodes-base.postgres",
+      "credentials": { "postgres": "Mark Postgres" },
+      "position": [600, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const student = $items('Postgres - Load Student Profile')[0]?.json?.data?.[0];\nconst transactions = $items('Postgres - Load Recent Transactions')[0]?.json?.data || [];\n\nif (!student) {\n  return [{ json: { statusCode: 404, error: 'NOT_FOUND', message: 'Perfil de aluno não encontrado.' } }];\n}\n\nreturn [{ json: { statusCode: 200, balance: student.balance || 0, recentTransactions: transactions } }];"
+      },
+      "id": "Function_AssembleDashboardResponse",
+      "name": "Function - Assemble Dashboard Response",
+      "type": "n8n-nodes-base.function",
+      "position": [850, 320]
+    },
+    {
+      "parameters": {
+        "responseMode": "onReceived",
+        "responseCode": "={{$json[\"statusCode\"] || 200}}",
+        "responseData": "={{$json}}"
+      },
+      "id": "Respond_StudentsDashboard",
+      "name": "Respond - /students/dashboard (GET)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1100, 320]
+    }
+  ],
+  "connections": {
+    "Webhook_StudentsDashboard": {
+      "main": [
+        [{ "node": "Function - Verify Student JWT", "type": "main", "index": 0 }]
+      ]
+    },
+    "Function_VerifyStudentJWT": {
+      "main": [
+        [
+          { "node": "Postgres - Load Student Profile", "type": "main", "index": 0 },
+          { "node": "Postgres - Load Recent Transactions", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Postgres_LoadStudentProfile": {
+      "main": [
+        [{ "node": "Function - Assemble Dashboard Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Postgres_LoadRecentTransactions": {
+      "main": [
+        [{ "node": "Function - Assemble Dashboard Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Function_AssembleDashboardResponse": {
+      "main": [
+        [{ "node": "Respond - /students/dashboard (GET)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "tags": ["domain:students", "env:dev", "method:GET"]
+}

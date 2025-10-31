@@ -1,0 +1,44 @@
+{
+  "name": "Auth - Get Me",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "auth/me",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "Webhook_AuthMe",
+      "name": "Webhook /auth/me",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\n\nconst authHeader = this.getHeader('authorization');\nif (!authHeader || !authHeader.startsWith('Bearer ')) {\n  return [{ json: { statusCode: 401, message: 'Token ausente ou inválido.', error: 'UNAUTHORIZED' } }];\n}\n\nconst token = authHeader.replace(/^Bearer\\s+/i, '').trim();\nconst [h, p, s] = token.split('.');\nif (!h || !p || !s) {\n  return [{ json: { statusCode: 401, message: 'Token malformado.', error: 'TOKEN_MALFORMED' } }];\n}\n\nconst recalculatedSignature = crypto.createHmac('sha256', process.env.JWT_SECRET).update(`${h}.${p}`).digest('base64url');\nif (s !== recalculatedSignature) {\n  return [{ json: { statusCode: 401, message: 'Assinatura do token inválida.', error: 'TOKEN_INVALID_SIGNATURE' } }];\n}\n\nconst payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));\nconst now = Math.floor(Date.now() / 1000);\nif (payload.exp && payload.exp < now) {\n  return [{ json: { statusCode: 401, message: 'Token expirado.', error: 'TOKEN_EXPIRED' } }];\n}\n\nreturn [{ json: { user: { id: payload.userId, role: payload.role, schoolId: payload.schoolId }, statusCode: 200 } }];"
+      },
+      "id": "Function_AuthMe",
+      "name": "Validate JWT",
+      "type": "n8n-nodes-base.function",
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "responseBody": "={{$json}}",
+        "responseCode": "={{$json[\"statusCode\"] || 200}}"
+      },
+      "id": "Respond_AuthMe",
+      "name": "Respond /auth/me",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [950, 300]
+    }
+  ],
+  "connections": {
+    "Webhook /auth/me": { "main": [ [{ "node": "Validate JWT", "type": "main", "index": 0 }] ] },
+    "Validate JWT": { "main": [ [{ "node": "Respond /auth/me", "type": "main", "index": 0 }] ] }
+  },
+  "settings": { "timezone": "America/Sao_Paulo" },
+  "tags": ["Auth", "JWT", "Mark API"]
+}
