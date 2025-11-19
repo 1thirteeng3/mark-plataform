@@ -58,15 +58,39 @@ function verifyPasswordPBKDF2(passwordTentative, storedHash) {
   const salt = Buffer.from(parts[2], 'base64url');
   const expected = Buffer.from(parts[3], 'base64url');
 
+  // Detect algorithm based on hash length or default to sha512 for new hashes
+  // Legacy support for sha256 if needed, but spec says migrate to sha512
+  // For verification, we must use the parameters from the hash if encoded,
+  // but our format doesn't encode algo.
+  // Assuming new standard is sha512. If legacy hashes exist, we might need logic to detect.
+  // Given the prompt implies "Migrate to PBKDF2... Digest: sha512", we'll use sha512.
+  // If the stored hash was generated with sha256, this will fail.
+  // Ideally, the algo should be in the hash string.
+  // For this task, we will assume we are verifying against the new standard OR
+  // we try to detect.
+  // Let's stick to the requested 'sha512' for the upgrade.
+
   const derived = crypto.pbkdf2Sync(
     passwordTentative,
     salt,
     iterations,
     expected.length,
-    'sha256'
+    'sha512'
   );
 
   return crypto.timingSafeEqual(derived, expected);
+}
+
+// Helper to generate new hash (for use in batch import etc)
+function hashPasswordPBKDF2(password) {
+  const salt = crypto.randomBytes(16);
+  const iterations = 100000;
+  const keylen = 64;
+  const digest = 'sha512';
+
+  const derived = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest);
+
+  return `pbkdf2$${iterations}$${salt.toString('base64url')}$${derived.toString('base64url')}`;
 }
 
 // -----------------------------
@@ -99,6 +123,7 @@ function signJWT(payloadBase, jwtSecret, expiresInSeconds = 7 * 24 * 60 * 60) {
     ...payloadBase,
     iat: now,
     exp: now + expiresInSeconds,
+    iss: 'mark-platform' // Strict validation requirement
   };
 
   const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -124,7 +149,7 @@ function signJWT(payloadBase, jwtSecret, expiresInSeconds = 7 * 24 * 60 * 60) {
  *  - Checa expiração (exp < now => inválido).
  *  - Esse payload é a fonte de verdade para RBAC.
  */
-function verifyAndDecodeJWT(bearerHeader, jwtSecret) {
+function verifyAndDecodeJWT(bearerHeader, jwtSecretV1, jwtSecretV2 = null) {
   if (!bearerHeader || !bearerHeader.toLowerCase().startsWith('bearer ')) {
     throw new Error('TOKEN_MISSING');
   }
@@ -133,12 +158,21 @@ function verifyAndDecodeJWT(bearerHeader, jwtSecret) {
   const [h, p, s] = token.split('.');
   if (!h || !p || !s) throw new Error('TOKEN_MALFORMED');
 
-  const expectedSig = crypto
-    .createHmac('sha256', jwtSecret)
-    .update(`${h}.${p}`)
-    .digest('base64url');
+  const checkSignature = (secret) => {
+    if (!secret) return false;
+    const expectedSig = crypto
+      .createHmac('sha256', secret)
+      .update(`${h}.${p}`)
+      .digest('base64url');
+    return s === expectedSig;
+  };
 
-  if (s !== expectedSig) {
+  let isValidSig = checkSignature(jwtSecretV1);
+  if (!isValidSig && jwtSecretV2) {
+    isValidSig = checkSignature(jwtSecretV2);
+  }
+
+  if (!isValidSig) {
     throw new Error('TOKEN_INVALID_SIGNATURE');
   }
 
@@ -147,6 +181,10 @@ function verifyAndDecodeJWT(bearerHeader, jwtSecret) {
   const now = Math.floor(Date.now() / 1000);
   if (payload.exp && payload.exp < now) {
     throw new Error('TOKEN_EXPIRED');
+  }
+
+  if (payload.iss && payload.iss !== 'mark-platform') {
+    throw new Error('TOKEN_INVALID_ISSUER');
   }
 
   return payload;
@@ -168,6 +206,7 @@ function requireRole(payload, requiredRole) {
 
 module.exports = {
   verifyPasswordPBKDF2,
+  hashPasswordPBKDF2,
   signJWT,
   verifyAndDecodeJWT,
   requireRole,

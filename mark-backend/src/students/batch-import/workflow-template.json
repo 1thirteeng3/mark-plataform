@@ -1,0 +1,101 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "students/batch-import",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Paste content of function-node_ParseAndValidate.js here"
+      },
+      "name": "Parse and Validate",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Paste content of function-node_GenerateCredentials.js here"
+      },
+      "name": "Generate Credentials",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "// Paste content of postgres-node_BatchInsert.sql here\n// Use $json.studentsToInsert as parameter",
+        "additionalFields": {
+            "queryParams": "={{JSON.stringify($json.studentsToInsert)}}"
+        }
+      },
+      "name": "Batch Insert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "content": "Import completed. {{ $json.rowCount }} students inserted."
+      },
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse and Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and Validate": {
+      "main": [
+        [
+          {
+            "node": "Generate Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Credentials": {
+      "main": [
+        [
+          {
+            "node": "Batch Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Insert": {
+      "main": [
+        [
+          {
+            "node": "Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

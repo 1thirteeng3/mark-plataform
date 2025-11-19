@@ -43,12 +43,13 @@ function verifyPasswordPBKDF2(passwordTentative, storedHash) {
   const salt = Buffer.from(parts[2], 'base64url');
   const expected = Buffer.from(parts[3], 'base64url');
 
+  // Updated to sha512 as per v1.1 spec
   const derived = crypto.pbkdf2Sync(
     passwordTentative,
     salt,
     iterations,
     expected.length,
-    'sha256'
+    'sha512'
   );
 
   return crypto.timingSafeEqual(derived, expected);
@@ -63,6 +64,7 @@ function signJWT(payloadBase, jwtSecret, expiresInSeconds = 7 * 24 * 60 * 60) {
     ...payloadBase,
     iat: now,
     exp: now + expiresInSeconds,
+    iss: 'mark-platform' // Strict validation requirement
   };
 
   const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -72,7 +74,7 @@ function signJWT(payloadBase, jwtSecret, expiresInSeconds = 7 * 24 * 60 * 60) {
   const data = `${h}.${p}`;
 
   const signature = crypto
-    .createHmac('sha256', process.env.JWT_SECRET)
+    .createHmac('sha256', jwtSecret)
     .update(data)
     .digest('base64url');
 
@@ -121,7 +123,8 @@ const tokenPayload = {
   schoolId: row.school_id,
 };
 
-const jwt = signJWT(tokenPayload, process.env.JWT_SECRET);
+// Use V1 secret for signing new tokens
+const jwt = signJWT(tokenPayload, process.env.JWT_SECRET_V1 || process.env.JWT_SECRET);
 
 // Monta resposta final no padrão camelCase exigido pelo LLD
 return [

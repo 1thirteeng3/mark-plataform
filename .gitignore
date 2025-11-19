@@ -1,7 +1,0 @@
-"# Arquivos de ambiente local" 
-".env.local" 
-".env.*.local" 
-"" 
-"# Arquivos de configura‡Æo de IDEs" 
-".vscode/" 
-".idea/" 
