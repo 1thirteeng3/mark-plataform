@@ -32,37 +32,74 @@ const crypto = require('crypto');
 // Helpers "locais" equivalentes às funções do nosso authUtils.js.
 // No n8n você pode copiar esse bloco, ou injetar via código compartilhado se estiver usando n8n self-host customizado.
 
-// --- PBKDF2 password check ---
-function verifyPasswordPBKDF2(passwordTentative, storedHash) {
-  const parts = storedHash.split('$');
-  if (parts.length !== 4 || parts[0] !== 'pbkdf2') {
-    return false;
-  }
+// --- PBKDF2 password hashing (for reference) ---
+// New passwords should be stored in this format.
+function hashPasswordPBKDF2(password) {
+  const salt = crypto.randomBytes(16);
+  const iterations = 100000;
+  const keylen = 64;
+  const digest = 'sha512';
 
-  const iterations = parseInt(parts[1], 10);
-  const salt = Buffer.from(parts[2], 'base64url');
-  const expected = Buffer.from(parts[3], 'base64url');
+  const hash = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest);
 
-  const derived = crypto.pbkdf2Sync(
-    passwordTentative,
-    salt,
-    iterations,
-    expected.length,
-    'sha256'
-  );
-
-  return crypto.timingSafeEqual(derived, expected);
+  // Store as "pbkdf2$<iterations>$<keylen>$<salt>$<hash>"
+  return `pbkdf2$${iterations}$${keylen}$${salt.toString('base64url')}$${hash.toString('base64url')}`;
 }
 
-// --- JWT sign ---
-function signJWT(payloadBase, jwtSecret, expiresInSeconds = 7 * 24 * 60 * 60) {
-  const header = { alg: 'HS256', typ: 'JWT' };
+
+// --- PBKDF2 password check (upgraded) ---
+// Supports both old and new hash formats for graceful migration.
+function verifyPasswordPBKDF2(passwordTentative, storedHash) {
+  const parts = storedHash.split('$');
+
+  // New format: pbkdf2$<iterations>$<keylen>$<salt>$<hash>
+  if (parts.length === 5 && parts[0] === 'pbkdf2') {
+      const iterations = parseInt(parts[1], 10);
+      const keylen = parseInt(parts[2], 10);
+      const salt = Buffer.from(parts[3], 'base64url');
+      const expected = Buffer.from(parts[4], 'base64url');
+
+      const derived = crypto.pbkdf2Sync(
+        passwordTentative,
+        salt,
+        iterations,
+        keylen,
+        'sha512'
+      );
+      return crypto.timingSafeEqual(derived, expected);
+
+  // Old format: pbkdf2$<iterations>$<salt>$<hash>
+  } else if (parts.length === 4 && parts[0] === 'pbkdf2') {
+    const iterations = parseInt(parts[1], 10);
+    const salt = Buffer.from(parts[2], 'base64url');
+    const expected = Buffer.from(parts[3], 'base64url');
+
+    const derived = crypto.pbkdf2Sync(
+        passwordTentative,
+        salt,
+        iterations,
+        expected.length,
+        'sha256' // Old digest
+    );
+    return crypto.timingSafeEqual(derived, expected);
+  }
+
+  // Not a recognized pbkdf2 format
+  return false;
+}
+
+// --- JWT sign (upgraded) ---
+// Signs with the NEW key (V1). Verification logic (in another middleware)
+// should check against V1 and V2 to support key rotation.
+function signJWT(payloadBase, expiresInSeconds = 7 * 24 * 60 * 60) {
+  const header = { alg: 'HS512', typ: 'JWT' };
   const now = Math.floor(Date.now() / 1000);
 
   const payload = {
     ...payloadBase,
     iat: now,
     exp: now + expiresInSeconds,
+    iss: "Mark-API", // Strict issuer validation
   };
 
   const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -72,7 +109,7 @@ function signJWT(payloadBase, jwtSecret, expiresInSeconds = 7 * 24 * 60 * 60) {
   const data = `${h}.${p}`;
 
   const signature = crypto
-    .createHmac('sha256', process.env.JWT_SECRET)
+    .createHmac('sha512', process.env.JWT_SECRET_V1) // Use new secret & algorithm
     .update(data)
     .digest('base64url');
 
@@ -121,7 +158,7 @@ const tokenPayload = {
   schoolId: row.school_id,
 };
 
-const jwt = signJWT(tokenPayload, process.env.JWT_SECRET);
+const jwt = signJWT(tokenPayload);
 
 // Monta resposta final no padrão camelCase exigido pelo LLD
 return [
