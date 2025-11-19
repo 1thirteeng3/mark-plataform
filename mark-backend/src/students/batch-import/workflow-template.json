@@ -1,0 +1,202 @@
+{
+  "name": "Student Batch Import",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "path": "students/batch-import",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        420,
+        300
+      ],
+      "webhookId": "batch-import-students"
+    },
+    {
+      "parameters": {
+        "functionCode": "const students = items[0].json.body.students;\nconst validatedStudents = [];\nconst errors = [];\n\nfor (const student of students) {\n  if (!student.email || !student.fullName || !student.className || !student.schoolRegistrationNumber) {\n    errors.push({ student: student, error: 'Missing required fields' });\n    continue;\n  }\n\n  if (validatedStudents.find(s => s.email === student.email)) {\n    errors.push({ student: student, error: 'Duplicate email in batch' });\n    continue;\n  }\n\n  validatedStudents.push(student);\n}\n\nreturn [{ json: { validatedStudents, errors } }];"
+      },
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        600,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 100,
+        "options": {}
+      },
+      "name": "Split in Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        780,
+        300
+      ],
+      "runAfter": [
+        "Validate Input"
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\n\nfunction hashPasswordPBKDF2(password) {\n  const salt = crypto.randomBytes(16);\n  const iterations = 100000;\n  const keylen = 64;\n  const digest = 'sha512';\n\n  const hash = crypto.pbkdf2Sync(password, salt, iterations, keylen, digest);\n\n  return `pbkdf2$${iterations}$${keylen}$${salt.toString('base64url')}$${hash.toString('base64url')}`;\n}\n\nconst studentsWithPasswords = items.map(item => {\n  const student = item.json;\n  const temporaryPassword = crypto.randomBytes(8).toString('hex');\n  student.passwordHash = hashPasswordPBKDF2(temporaryPassword);\n  student.temporaryPassword = temporaryPassword; // For reporting purposes only\n  return student;\n});\n\nreturn studentsWithPasswords.map(s => ({ json: s }));"
+      },
+      "name": "Generate and Hash Passwords",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO users (full_name, email, password_hash, role) SELECT full_name, email, password_hash, 'STUDENT' as role FROM json_to_recordset('{{$items.map(i=>i.json).join('') | json}}') as x(full_name text, email text, password_hash text, className text, schoolRegistrationNumber text, enrollmentId text, temporaryPassword text) ON CONFLICT (email) DO NOTHING RETURNING id, email",
+        "options": {}
+      },
+      "name": "Batch Insert Users",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        300
+      ],
+      "credentials": {
+        "postgres": "postgres-db"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const insertedUsers = $items('Batch Insert Users')[0].json;\nconst studentsWithPasswords = $items('Generate and Hash Passwords').map(i => i.json);\n\nconst studentsToInsert = studentsWithPasswords.map(s => {\n  const insertedUser = insertedUsers.find(u => u.email === s.email);\n  if (insertedUser) {\n    s.userId = insertedUser.id;\n  }\n  return s;\n}).filter(s => s.userId);\n\nreturn studentsToInsert.map(s => ({ json: s }));"
+      },
+      "name": "Map Users to Students",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO students (user_id, class_name, school_registration_number, enrollment_id) SELECT userId, className, schoolRegistrationNumber, enrollmentId FROM json_to_recordset('{{$items.map(i=>i.json).join('') | json}}') as x(userId uuid, className text, schoolRegistrationNumber text, enrollmentId text) ON CONFLICT (user_id) DO NOTHING RETURNING user_id",
+        "options": {}
+      },
+      "name": "Batch Insert Students",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        300
+      ],
+      "credentials": {
+        "postgres": "postgres-db"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const successfulStudentInserts = $items('Batch Insert Students').map(i=>i.json);\nconst allStudentsWithPasswords = $items('Generate and Hash Passwords').map(i => i.json);\nconst errors = $items('Validate Input')[0].json.errors;\n\nconst successfulImports = allStudentsWithPasswords.filter(s => successfulStudentInserts.find(ss => ss.user_id === s.userId));\n\nconst report = {\n  successfulImports: successfulImports.length,\n  failedImports: allStudentsWithPasswords.length - successfulImports.length + errors.length,\n  details: {\n    success: successfulImports.map(s => ({ email: s.email, temporaryPassword: s.temporaryPassword })),\n    failures: errors\n  }\n};\n\nreturn [{ json: report }];"
+      },
+      "name": "Create Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Webhook",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Split in Batches": {
+      "main": [
+        [
+          {
+            "node": "Generate and Hash Passwords",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Generate and Hash Passwords": {
+      "main": [
+        [
+          {
+            "node": "Batch Insert Users",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Batch Insert Users": {
+      "main": [
+        [
+          {
+            "node": "Map Users to Students",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Map Users to Students": {
+      "main": [
+        [
+          {
+            "node": "Batch Insert Students",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Batch Insert Students": {
+      "main": [
+        [
+          {
+            "node": "Create Report",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "id": "4"
+}

@@ -1,0 +1,52 @@
+{
+  "name": "Marks Expiration Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "mode": "cron",
+          "value": "0 0 31 12 *"
+        }
+      },
+      "name": "Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT run_annual_expiration()",
+        "options": {}
+      },
+      "name": "Run Annual Expiration",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        420,
+        300
+      ],
+      "credentials": {
+        "postgres": "postgres-db"
+      }
+    }
+  ],
+  "connections": {
+    "Cron": {
+      "main": [
+        [
+          {
+            "node": "Run Annual Expiration",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "id": "5"
+}
