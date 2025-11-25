@@ -1,0 +1,355 @@
+Assunto: ADENDO AO PROMPT INSTRUCIONAL: Implementação do Painel SUPER_ADMIN (Administração da Plataforma)
+
+Destinatário: Equipe de Desenvolvimento (Expert Full-Stack)
+
+Contexto da Evolução: Além dos perfis ADMIN (Gestor de Escola) e STUDENT (Aluno), estamos introduzindo um terceiro nível de acesso: SUPER_ADMIN. Este perfil não pertence a nenhuma escola específica e tem como objetivo administrar a plataforma "Mark" como um todo.
+
+Requisitos da Funcionalidade: O SUPER_ADMIN deve ter um painel exclusivo que permita:
+
+Visualizar estatísticas globais (total de escolas, alunos, etc.).
+
+Listar todas as escolas cadastradas.
+
+Listar todos os alunos de todas as escolas.
+
+Visualizar o ledger global (fluxo de transações de todas as escolas).
+
+Gerenciar (CRUD - Criar, Ler, Atualizar, Excluir) o catálogo mestre de voucher_catalog, que é o mesmo catálogo consumido pelos alunos.
+
+I. Modificações na Fundação (Itens a Alterar)
+Antes de criar novos endpoints, a arquitetura existente deve ser modificada para suportar o novo perfil.
+
+1. Banco de Dados (PostgreSQL) O user_role e a tabela users devem ser atualizados.
+
+1.1. Alterar o ENUM user_role: Execute o comando SQL para adicionar o novo perfil (faça isso antes de qualquer outra alteração de dados):
+
+SQL
+
+ALTER TYPE user_role ADD VALUE 'SUPER_ADMIN';
+1.2. Alterar a Tabela users: Um SUPER_ADMIN não está vinculado a uma school_id. A chave estrangeira school_id na tabela users deve ser tornada nula (nullable).
+
+SQL
+
+ALTER TABLE users ALTER COLUMN school_id DROP NOT NULL;
+Nota: Se school_id for uma Foreign Key, ela já permite NULL por padrão, a menos que tenha sido definida explicitamente como NOT NULL. Verifique a definição da sua tabela.
+
+1.3. Inserir o Usuário SUPER_ADMIN: Este usuário deve ser criado manualmente no banco de dados, pois não haverá fluxo de "cadastro" para ele.
+
+SQL
+
+-- (Lembre-se de hashear a senha 'super_password_segura' usando seu script PBKDF2/bcrypt)
+INSERT INTO users (id, school_id, name, email, password_hash, role, created_at)
+VALUES (
+  gen_random_uuid(),
+  NULL,
+  'Mark Platform Admin',
+  'admin@mark.local',
+  'hash_da_senha_super_segura',
+  'SUPER_ADMIN',
+  NOW()
+);
+2. Autenticação (n8n - Endpoint POST /auth/login)
+
+Nenhuma Ação Necessária. O workflow de login existente (POST /auth/login) já seleciona o role e o school_id do usuário. Ao fazer login com admin@mark.local, o JWT gerado conterá:
+
+JSON
+
+{ "userId": "...", "role": "SUPER_ADMIN", "schoolId": null, "exp": ... }
+Isso é o comportamento desejado.
+
+3. Frontend (React - Roteamento em app/page.tsx) O roteador principal da aplicação deve ser atualizado para incluir o novo painel.
+
+Arquivo: app/page.tsx
+
+Lógica:
+
+TypeScript
+
+// Dentro do componente 'App' ou 'MainPage'
+const { isAuthenticated, user } = useAuthStore();
+
+if (!isAuthenticated || !user) {
+  return <LoginPage />;
+}
+
+// ADICIONAR ESTA NOVA VERIFICAÇÃO (ANTES DAS OUTRAS)
+if (user.role === 'SUPER_ADMIN') {
+  return <SuperAdminDashboard />;
+}
+
+if (user.role === 'ADMIN') {
+  return <AdminDashboard />;
+}
+
+if (user.role === 'STUDENT') {
+  return <StudentDashboard />;
+}
+
+// Fallback (ex: usuário com role desconhecido)
+return <LoginPage />;
+II. Backend: Novos Workflows (n8n) - Painel SUPER_ADMIN
+Você deve criar um novo conjunto de endpoints, prefixados com /platform, protegidos por um novo middleware.
+
+1. Novo Middleware: [Middleware] VerifySuperAdminJWT
+
+Objetivo: Proteger todos os endpoints /platform.
+
+Fluxo:
+
+Webhook: Recebe o header Authorization: Bearer <token>.
+
+Function (VerifySuperAdminJWT): Copie a lógica do Verify Admin JWT, mas modifique a verificação de perfil:
+
+Valida a assinatura (HS256) e a expiração.
+
+Extrai o payload (userId, role).
+
+Verificação de Perfil: if (payload.role !== 'SUPER_ADMIN') { return respondError(403, 'Acesso negado. Requer privilégios de Super Admin.'); }
+
+Respond: Passa o payload (especialmente userId) para os próximos nós. Nota: Este middleware não deve falhar se schoolId for nulo.
+
+2. Novos Endpoints da Plataforma (CRUD e Visualização)
+
+Todos os endpoints a seguir devem, obrigatoriamente, passar pelo middleware VerifySuperAdminJWT no início do workflow.
+
+Endpoint 9: GET /platform/stats
+Objetivo: Retornar estatísticas globais para o dashboard.
+
+Fluxo:
+
+Postgres (Multi-Query): Execute múltiplas queries (ou use UNION ALL) para obter contagens.
+
+SQL
+
+SELECT 'schools' as metric, COUNT(*) as value FROM schools
+UNION ALL
+SELECT 'students' as metric, COUNT(*) as value FROM users WHERE role = 'STUDENT'
+UNION ALL
+SELECT 'transactions' as metric, COUNT(*) as value FROM ledger_transactions
+UNION ALL
+SELECT 'totalMarks' as metric, COALESCE(SUM(marks_balance), 0) as value FROM students;
+Respond (200 OK): Retorna { "schools": ..., "students": ..., "transactions": ..., "totalMarks": ... }.
+
+Endpoint 10: GET /platform/schools
+Objetivo: Listar todas as escolas cadastradas.
+
+Fluxo:
+
+Postgres (SELECT):
+
+Query: SELECT id, name, created_at AS "createdAt" FROM schools ORDER BY name ASC;
+
+Respond (200 OK): Retorna um array [...].
+
+Endpoint 11: GET /platform/students (com Paginação)
+Objetivo: Listar todos os alunos de todas as escolas.
+
+Fluxo:
+
+Webhook: Recebe query params ?page=1&limit=20.
+
+Function (Calc Offset): const offset = (page - 1) * limit;.
+
+Postgres (SELECT):
+
+Query:
+
+SQL
+
+SELECT
+  u.id,
+  u.name AS "userName",
+  u.email,
+  s.marks_balance AS "marksBalance",
+  sc.name AS "schoolName"
+FROM users u
+JOIN students s ON u.id = s.user_id
+JOIN schools sc ON u.school_id = sc.id
+WHERE u.role = 'STUDENT'
+ORDER BY sc.name ASC, u.name ASC
+LIMIT $1 OFFSET $2;
+Parâmetros: $1=limit, $2=offset.
+
+Respond (200 OK): Retorna um array [...].
+
+Endpoint 12: GET /platform/transactions (com Paginação)
+Objetivo: Visualizar o ledger global.
+
+Fluxo:
+
+Webhook: Recebe query params ?page=1&limit=50.
+
+Function (Calc Offset): const offset = (page - 1) * limit;.
+
+Postgres (SELECT):
+
+Query:
+
+SQL
+
+SELECT
+  lt.id,
+  lt.type,
+  lt.amount,
+  lt.description,
+  lt.created_at AS "createdAt",
+  u.name AS "studentName",
+  sc.name AS "schoolName"
+FROM ledger_transactions lt
+JOIN students s ON lt.student_id = s.id
+JOIN users u ON s.user_id = u.id
+JOIN schools sc ON u.school_id = sc.id
+ORDER BY lt.created_at DESC
+LIMIT $1 OFFSET $2;
+Parâmetros: $1=limit, $2=offset.
+
+Respond (200 OK): Retorna um array [...].
+
+Endpoint 13: GET /platform/vouchers
+Objetivo: Listar todos os vouchers do catálogo para gerenciamento (incluindo inativos).
+
+Fluxo:
+
+Postgres (SELECT):
+
+Query: SELECT id, name, description, marks_cost AS "marksCost", provider_product_id AS "providerProductId", is_available AS "isAvailable" FROM voucher_catalog ORDER BY name ASC;
+
+Respond (200 OK): Retorna um array [...].
+
+Endpoint 14: POST /platform/vouchers
+Objetivo: Criar um novo item no catálogo de vouchers.
+
+Fluxo:
+
+Webhook: Recebe body { "name": "...", "description": "...", "marksCost": 5000, "providerProductId": "SKU-123", "isAvailable": true }.
+
+Function (Validate Body): Garante que todos os campos obrigatórios estão presentes.
+
+Postgres (INSERT):
+
+Query: INSERT INTO voucher_catalog (name, description, marks_cost, provider_product_id, is_available) VALUES ($1, $2, $3, $4, $5) RETURNING *; (com AS "camelCase").
+
+Parâmetros: $1=name, $2=description, $3=marksCost, $4=providerProductId, $5=isAvailable.
+
+Respond (201 Created): Retorna o objeto do voucher criado.
+
+Endpoint 15: PUT /platform/vouchers/:id
+Objetivo: Atualizar um voucher existente.
+
+Fluxo:
+
+Webhook: Recebe o id como parâmetro de URL (ex: /platform/vouchers/uuid-123) e o body { "name": "...", "marksCost": 5500, ... }.
+
+Function (Validate Body): Garante que os campos estão corretos.
+
+Postgres (UPDATE):
+
+Query: UPDATE voucher_catalog SET name = $1, description = $2, marks_cost = $3, provider_product_id = $4, is_available = $5 WHERE id = $6 RETURNING *; (com AS "camelCase").
+
+Parâmetros: $1-5 vêm do body, $6=id vem do parâmetro da URL ({{$params.id}}).
+
+Respond (200 OK): Retorna o objeto do voucher atualizado.
+
+Endpoint 16: DELETE /platform/vouchers/:id
+Objetivo: Excluir (ou desativar) um voucher.
+
+Decisão Arquitetural: Excluir (DELETE) um voucher é arriscado se já houver resgates (redeemed_vouchers) atrelados a ele (violação de FK). A melhor abordagem é a exclusão lógica (soft delete), que já está prevista pelo campo is_available.
+
+Fluxo (Redefinido para Soft Delete):
+
+Webhook: Recebe o id como parâmetro de URL (ex: /platform/vouchers/uuid-123/delete).
+
+Postgres (UPDATE):
+
+Query: UPDATE voucher_catalog SET is_available = false WHERE id = $1 RETURNING *;
+
+Parâmetros: $1=id.
+
+Respond (200 OK): Retorna o objeto do voucher (agora inativo).
+
+III. Frontend: Novas Interfaces (React) - Painel SUPER_ADMIN
+Crie uma nova árvore de componentes sob components/superadmin/.
+
+1. Nova Página Principal:
+
+Arquivo: components/pages/SuperAdminDashboard.tsx
+
+Conteúdo:
+
+Layout principal com o nome do usuário SUPER_ADMIN e botão de logout().
+
+Componente <Tabs> do ShadCN/UI com as seguintes abas:
+
+Visão Geral (default) -> Renderiza <PlatformStats />
+
+Escolas -> Renderiza <SchoolList />
+
+Alunos -> Renderiza <StudentList />
+
+Transações -> Renderiza <TransactionLedger />
+
+Catálogo de Vouchers -> Renderiza <VoucherManager />
+
+2. Componentes das Abas:
+
+components/superadmin/PlatformStats.tsx:
+
+Usa useQuery(['platformStats'], ...) para chamar GET /platform/stats.
+
+Renderiza 4 Cards (do ShadCN) exibindo as métricas: "Total de Escolas", "Total de Alunos", "Total de Transações", "Total de Marks em Circulação".
+
+components/superadmin/SchoolList.tsx:
+
+Usa useQuery(['platformSchools'], ...) para chamar GET /platform/schools.
+
+Renderiza uma <Table> (do ShadCN) listando id, name, createdAt.
+
+components/superadmin/StudentList.tsx:
+
+Usa useQuery(['platformStudents', page], ...) para chamar GET /platform/students?page=....
+
+Renderiza uma <Table> listando userName, email, schoolName, marksBalance.
+
+Implementa botões de <Pagination> (do ShadCN).
+
+components/superadmin/TransactionLedger.tsx:
+
+Usa useQuery(['platformTransactions', page], ...) para chamar GET /platform/transactions?page=....
+
+Renderiza uma <Table> listando createdAt, studentName, schoolName, type (Crédito/Débito), amount, description.
+
+Implementa <Pagination>.
+
+components/superadmin/VoucherManager.tsx (Componente CRUD):
+
+Usa useQuery(['platformVouchers'], ...) para chamar GET /platform/vouchers.
+
+Renderiza um <Button> "Adicionar Novo Voucher" no topo.
+
+Renderiza uma <Table> com os vouchers, exibindo name, marksCost, providerProductId e isAvailable (como um "Badge" "Ativo" ou "Inativo").
+
+Cada linha da tabela deve ter um menu (...) com as ações "Editar" e "Desativar" (se isAvailable=true) / "Reativar" (se isAvailable=false).
+
+components/superadmin/VoucherFormDialog.tsx (Modal de Edição/Criação):
+
+Este componente é um <Dialog> (do ShadCN) que contém um formulário (usando zod e react-hook-form).
+
+Recebe voucher?: Voucher como prop. Se voucher existir, o formulário é pré-preenchido para edição; senão, é um formulário de criação.
+
+Campos: name, description, marksCost (Number), providerProductId, isAvailable (Switch).
+
+Mutations (TanStack Query):
+
+const createMutation = useMutation(api.postPlatformVoucher, ...)
+
+const updateMutation = useMutation(api.putPlatformVoucher, ...)
+
+onSubmit: Chama updateMutation se houver voucher.id, ou createMutation se não houver.
+
+onSuccess (de ambas): Invalida a query ['platformVouchers'] (para atualizar a tabela de admin) e também ['catalog'] (para atualizar a visão dos alunos).
+
+Mutations de Ativação/Desativação:
+
+A ação "Desativar" / "Reativar" na tabela deve chamar uma useMutation separada que chama PUT /platform/vouchers/:id (ou DELETE se você implementou o soft delete) apenas para alterar o status is_available.
+
+onSuccess: Invalida ['platformVouchers'] e ['catalog'].

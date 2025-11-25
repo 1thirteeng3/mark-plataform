@@ -1,0 +1,292 @@
+Assunto: ADENDO AO PROMPT INSTRUCIONAL: Checklist de Produção (Go-Live) para a Plataforma Mark
+
+Destinatário: Equipe de Desenvolvimento (Expert Full-Stack)
+
+Contexto da Evolução: A funcionalidade do MVP e do painel SUPER_ADMIN está completa. A tarefa agora é tornar esta aplicação "production-ready". Isso envolve mover de um ambiente de desenvolvimento (.local) para uma infraestrutura de produção segura, monitorada e resiliente, pronta para aceitar clientes pagantes e processar transações de valor real.
+
+Siga rigorosamente este checklist para o "Go-Live".
+
+I. Infraestrutura de Produção e Deploy
+O ambiente .local deve ser replicado para um ambiente de produção seguro.
+
+1. Domínios e DNS:
+
+Configure registros DNS para seus domínios reais.
+
+app.mark.com.br (exemplo) -> Apontar para o IP do Nginx (Frontend).
+
+api.mark.com.br (exemplo) -> Apontar para o IP do Nginx (Backend).
+
+2. Configuração do Nginx (Produção): O Nginx é seu ponto de entrada e a primeira linha de defesa.
+
+SSL/TLS (HTTPS Obrigatório):
+
+Instale o certbot e use o plugin do Nginx para gerar e renovar certificados SSL gratuitos da Let's Encrypt para ambos os domínios (app e api).
+
+Configure o Nginx para redirecionar permanentemente (301) todo o tráfego HTTP para HTTPS.
+
+Headers de Segurança: Adicione os seguintes headers aos blocos server do Nginx para proteção:
+
+Nginx
+
+# Redireciona HTTP para HTTPS
+server {
+    listen 80;
+    server_name api.mark.com.br app.mark.com.br;
+    return 301 https://$host$request_uri;
+}
+
+# Bloco da API
+server {
+    listen 443 ssl http2;
+    server_name api.mark.com.br;
+
+    # Caminhos do SSL (gerados pelo certbot)
+    ssl_certificate /etc/letsencrypt/live/api.mark.com.br/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.mark.com.br/privkey.pem;
+
+    # Headers de Segurança
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Configuração de CORS (Cross-Origin)
+    # Permite APENAS o seu frontend
+    if ($request_method = 'OPTIONS') {
+        add_header 'Access-Control-Allow-Origin' 'https://app.mark.com.br';
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS';
+        add_header 'Access-Control-Allow-Headers' 'Authorization,Content-Type';
+        add_header 'Access-Control-Max-Age' 1728000;
+        add_header 'Content-Type' 'text/plain; charset=utf-8';
+        add_header 'Content-Length' 0;
+        return 204;
+    }
+    if ($request_method ~* "(GET|POST|PUT|DELETE)") {
+        add_header 'Access-Control-Allow-Origin' 'https://app.mark.com.br';
+    }
+
+    location / {
+        proxy_pass http://localhost:5678; # (Porta do n8n)
+        # ... (configuração de proxy headers)
+    }
+}
+
+# Bloco do Frontend (App)
+server {
+    listen 443 ssl http2;
+    server_name app.mark.com.br;
+
+    # SSL e Headers de Segurança (iguais ao da API)
+    # ...
+
+    root /var/www/mark-frontend/build; # Caminho do build do React
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html; # Roteamento de SPA
+    }
+}
+Build de Produção (Frontend):
+
+No projeto mark-frontend, execute npm run build.
+
+Copie o conteúdo da pasta build (ou dist) para o diretório root configurado no Nginx (ex: /var/www/mark-frontend/build).
+
+3. Docker Compose de Produção:
+
+Crie um arquivo docker-compose.prod.yml.
+
+Volumes Persistentes: Garanta que os dados do PostgreSQL e do n8n sejam persistidos em volumes nomeados ou em bind mounts para diretórios no host (ex: /opt/mark/postgres-data).
+
+Variáveis de Ambiente (.env):
+
+NÃO versione arquivos .env.
+
+Crie um arquivo .env.production no servidor (fora do Git) e use a diretiva env_file: .env.production no docker-compose.prod.yml para injetar os segredos.
+
+II. Segurança Mandatória e Conformidade (Hardening)
+1. Gerenciamento de Segredos (Reforço):
+
+Conforme LLD e Guia de Onboarding, nenhum segredo deve estar no código.
+
+Obrigatório no .env.production:
+
+DATABASE_URL: String de conexão completa do Postgres.
+
+JWT_SECRET: Uma string longa e aleatória (use openssl rand -hex 32).
+
+VOUCHER_API_KEY: A chave de API real do seu provedor de vouchers.
+
+EMAIL_SMTP_HOST, EMAIL_SMTP_USER, EMAIL_SMTP_PASS: Credenciais do serviço de e-mail (veja abaixo).
+
+2. E-mails Transacionais (Novo Requisito Crítico): Um produto real deve se comunicar com os usuários.
+
+Serviço: Configure um serviço de e-mail transacional (ex: Amazon SES, SendGrid, Mailgun). Não use SMTP do Gmail.
+
+Integração (n8n):
+
+Configure a credencial SMTP no n8n usando as variáveis de ambiente (EMAIL_...).
+
+Novos Fluxos de E-mail (Obrigatório):
+
+Boas-vindas (Admin Escola): Após o SUPER_ADMIN cadastrar uma nova escola e um admin, dispare um e-mail para o ADMIN com um link para definir a senha (requer um fluxo de "reset de senha"). Alternativa mais simples (MVP): O SUPER_ADMIN define uma senha temporária e a comunica fora da plataforma.
+
+Resgate Concluído (Aluno): No fluxo POST /vouchers/redeem, após o "Caminho Feliz" (sucesso da API), adicione um nó "Send Email" para enviar o voucher_code e as instruções para o e-mail do aluno.
+
+Falha no Resgate (Aluno/Admin): Se a transação de compensação (estorno) ocorrer, envie um e-mail ao aluno informando a falha e o estorno, e um e-mail crítico para o SUPER_ADMIN investigar a falha com o provedor.
+
+3. Revisão de Validação e RBAC (Backend):
+
+Auditoria: Verifique todos os workflows do n8n.
+
+RBAC: Garanta que todo endpoint (exceto /login) inicia com o middleware de verificação de JWT (VerifyAdminJWT, VerifyStudentJWT, VerifySuperAdminJWT).
+
+Validação de Input: Use o nó "Function (Validate Body)" em todos os endpoints que recebem POST ou PUT para garantir que os tipos de dados estão corretos e campos inesperados são ignorados.
+
+III. Requisitos de Negócio e Operacionais (Go-to-Market)
+1. Integração Real com Provedor de Vouchers:
+
+Substitua qualquer mock do provedor de vouchers (ex: Reloadly) pela integração real.
+
+Configure a credencial HTTP no n8n usando a VOUCHER_API_KEY do .env.
+
+Carregue o voucher_catalog no banco de dados com os provider_product_id reais do catálogo do provedor.
+
+Teste de Ponta a Ponta: Realize um resgate real (comprando um voucher de baixo valor) para validar o fluxo.
+
+2. Fluxo de Onboarding de Clientes (Escolas) - (Novo Requisito): Para vender, você precisa de um fluxo para cadastrar escolas.
+
+Implementação (Via SUPER_ADMIN):
+
+No painel SUPER_ADMIN, adicione um novo componente/página "Gerenciar Escolas".
+
+CRUD de Escolas:
+
+POST /platform/schools: Cria uma nova escola (requer name, contact_email, etc.).
+
+GET /platform/schools (Já existe).
+
+PUT /platform/schools/:id: Atualiza dados da escola.
+
+CRUD de Admins de Escolas (Associado):
+
+Crie uma visão no painel do Super Admin para "Gerenciar Admins".
+
+POST /platform/schools/:schoolId/admins: Cria um novo usuário com role = 'ADMIN' associado à schoolId. O fluxo deve:
+
+Receber name, email, password (senha temporária).
+
+Hashear a senha.
+
+INSERT INTO users (school_id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, 'ADMIN');
+
+(Opcional, mas recomendado) Disparar o e-mail de boas-vindas.
+
+3. Integração com Gateway de Pagamento (Billing) - (Novo Requisito): Um SaaS precisa cobrar.
+
+Decisão de Arquitetura: O Mark não processará pagamentos, mas reagirá a eles.
+
+Serviço: Escolha um gateway de subscrição (ex: Stripe, Vindi, PagSeguro).
+
+Novo Endpoint (Webhook de Faturamento):
+
+Crie um endpoint POST /webhooks/billing no n8n. Este endpoint não é protegido por JWT, mas deve ser protegido por uma chave secreta verificada (assinatura do webhook, ex: Stripe-Signature).
+
+Fluxo:
+
+O Stripe (exemplo) envia um evento invoice.paid (fatura paga) ou customer.subscription.created.
+
+O Webhook do n8n recebe o evento.
+
+Valida a assinatura do webhook.
+
+Extrai o school_id (que você deve armazenar no metadado do cliente no Stripe).
+
+Postgres (UPDATE): UPDATE schools SET is_active = true, subscription_status = 'active' WHERE id = $1;.
+
+Bloqueio de Acesso:
+
+Modifique o middleware Verify Admin JWT no n8n.
+
+Após validar o JWT (que contém schoolId), adicione um nó Postgres (Check School Status):
+
+SELECT is_active FROM schools WHERE id = $1; (usando schoolId do JWT).
+
+Function (Check Status): Se is_active for false, retorne 403 Forbidden { "error": "Pagamento pendente. Acesso bloqueado." }.
+
+IV. Operações, Monitoramento e Resiliência (Pós-Go-Live)
+1. Backups de Banco de Dados (Reforço):
+
+Conforme Guia de Onboarding.
+
+Configure um cron job no host do servidor para executar pg_dump diariamente.
+
+Envie os backups para um armazenamento externo (ex: AWS S3, Google Cloud Storage, Backblaze B2).
+
+Teste de Restauração: Execute uma restauração do backup em um banco de dados de teste antes do Go-Live.
+
+2. Logging Aprimorado:
+
+Nginx: Configure o access_log e error_log para arquivos persistentes (ex: /var/log/nginx/mark-api.log).
+
+n8n: Configure o n8n (via variáveis de ambiente) para logar ERROR e WARN em stdout, para que o docker logs capture.
+
+Postgres: Configure o Postgres (via postgresql.conf) para logar slow queries (ex: log_min_duration_statement = 500 para queries > 500ms).
+
+3. Endpoint de Health Check (Novo Requisito):
+
+Objetivo: Permitir que um serviço externo (como UptimeRobot) monitore se a aplicação está viva.
+
+Endpoint: GET /healthz (sem autenticação).
+
+Fluxo (n8n):
+
+Webhook: Recebe GET /healthz.
+
+Postgres (Ping): Executa SELECT 1;.
+
+IF (Node): Se o Postgres falhar, retorna 503 Service Unavailable.
+
+Respond (200 OK): Retorna { "status": "ok", "timestamp": "..." }.
+
+4. Teste de Resiliência (Fluxo de Resgate):
+
+Valide o "Caminho Triste" do POST /vouchers/redeem (descrito no prompt do MVP).
+
+Teste Manual:
+
+Execute o workflow POST /vouchers/redeem.
+
+Coloque um breakpoint (ou nó "Wait") após o débito no banco e antes da chamada à API externa.
+
+Verifique o banco: o saldo do aluno deve ter diminuído e a transação deve estar PENDING.
+
+Force o nó da API externa a falhar.
+
+Continue o workflow.
+
+Verificação Final: O saldo do aluno deve ter sido estornado, a redeemed_vouchers deve estar FAILED, e deve haver uma transação de CREDIT (estorno) no ledger.
+
+V. Polimento da Aplicação (Frontend/Legal)
+1. Remoção de Mocks e Dados de Teste:
+
+Frontend: Remova completamente o lib/store/data.ts (mock data store) e substitua todas as suas chamadas pelas chamadas reais da API (TanStack Query / useMutation).
+
+Backend: Limpe as tabelas (TRUNCATE) de todos os dados de teste (usuários, escolas, transações) antes de cadastrar o primeiro cliente real.
+
+2. Páginas Legais (Obrigatório para Vender):
+
+Frontend:
+
+Adicione rotas (ex: /termos-de-uso, /politica-de-privacidade) no React (se estiver usando roteador).
+
+Adicione links no rodapé do <LoginPage /> e dos dashboards para essas páginas.
+
+O conteúdo deve ser fornecido pela equipe jurídica.
+
+3. Tratamento de Erros na UI (Polimento):
+
+Garanta que todas as chamadas useMutation (TanStack Query) tenham um onError definido.
+
+Use um componente "Toast" ou "Alert" (do ShadCN) para exibir mensagens de erro amigáveis ao usuário (ex: "E-mail ou senha incorretos", "Saldo insuficiente", "Erro ao salvar, tente novamente."). Não exiba erros de API brutos.

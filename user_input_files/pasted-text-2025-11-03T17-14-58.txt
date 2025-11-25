@@ -1,0 +1,323 @@
+Com base nos documentos de arquitetura (HLD, LLD) e no Guia de Onboarding fornecidos, aqui está um prompt instrucional completo e detalhado para o desenvolvimento da plataforma "Mark" do zero.
+
+-----
+
+**Assunto:** Instruções Detalhadas para Desenvolvimento Full-Stack do MVP da Plataforma "Mark"
+
+**Destinatário:** Equipe de Desenvolvimento (Expert Full-Stack)
+
+**Contexto do Projeto:**
+[cite\_start]Você foi encarregado de construir o Produto Mínimo Viável (MVP) da "Mark", uma plataforma de gamificação B2B (Software as a Service) para instituições de ensino[cite: 28]. [cite\_start]O objetivo é combater o baixo engajamento estudantil "tokenizando" o esforço e desempenho dos alunos em pontos digitais chamados "Marks"[cite: 29].
+
+O fluxo de valor central é:
+
+1.  [cite\_start]**Gestores (Admins)** de escolas definem "Conquistas" (regras de premiação, ex: "Participação em Aula" = 100 Marks)[cite: 50, 128].
+2.  [cite\_start]Gestores premiam alunos manualmente, creditando Marks[cite: 51, 129].
+3.  [cite\_start]**Alunos (Students)** acessam seus painéis, veem seu saldo e extrato de transações[cite: 52, 133, 134].
+4.  [cite\_start]Alunos resgatam seus Marks por vouchers de produtos reais (ex: iFood, Netflix) através de um catálogo digital, que é viabilizado por uma integração com uma API de um provedor externo[cite: 53, 54, 141].
+
+Sua tarefa é implementar toda a stack (Infraestrutura, Banco de Dados, Backend e Frontend) seguindo rigorosamente os requisitos de arquitetura, contratos de API e princípios de segurança definidos nos documentos.
+
+-----
+
+### I. Requisitos da Stack de Tecnologia (HLD)
+
+[cite\_start]Você deve usar a seguinte stack tecnológica[cite: 227]:
+
+  * [cite\_start]**Infraestrutura:** Servidor (ex: VPS Hostinger/AWS) com Linux (Ubuntu 22.04+)[cite: 539].
+  * [cite\_start]**Orquestração:** Docker e Docker Compose[cite: 539].
+  * [cite\_start]**Proxy Reverso:** Nginx (para rotear `api.mark.local` e `app.mark.local`) [cite: 539, 725-727].
+  * [cite\_start]**Banco de Dados:** PostgreSQL (versão 15+)[cite: 162, 227, 549].
+  * [cite\_start]**Backend (Lógica de Negócio):** n8n (self-hosted), expondo endpoints via Webhooks[cite: 158, 227, 527].
+  * [cite\_start]**Frontend:** React (usando Vite ou Next.js) como uma Single-Page Application (SPA)[cite: 154, 227, 526].
+  * [cite\_start]**Gerenciamento de Estado (Frontend):** Zustand (para estado global) e TanStack Query (para estado de servidor)[cite: 2798, 2818, 665, 666].
+  * [cite\_start]**Autenticação:** JWT (HS256) customizado, implementado nos Function Nodes do n8n[cite: 530, 1094].
+  * [cite\_start]**API Externa:** Um provedor de Vouchers (ex: Reloadly), para o qual você configurará uma credencial HTTP[cite: 227, 29, 710].
+
+-----
+
+### II. Fundação: Banco de Dados (PostgreSQL)
+
+[cite\_start]Esta é a "Fonte da Verdade"[cite: 160]. [cite\_start]Implemente o schema DDL (Data Definition Language) *exatamente* como especificado no LLD[cite: 2831]. A integridade do `ledger_transactions` é a principal regra de negócio do sistema.
+
+**DDL (Resumido para Contexto):**
+[cite\_start](Implemente o DDL completo do LLD [cite: 2834-2935])
+
+1.  [cite\_start]**Habilite a Extensão:** `CREATE EXTENSION IF NOT EXISTS "pgcrypto";`[cite: 2836].
+2.  [cite\_start]**Crie os ENUMs:** `user_role` ('ADMIN', 'STUDENT'), `transaction_type` ('CREDIT', 'DEBIT'), `redemption_status` ('PENDING', 'COMPLETED', 'FAILED') [cite: 2838-2840].
+3.  **Crie as Tabelas:**
+      * [cite\_start]`schools`: (id, name, created\_at, ...)[cite: 2842].
+      * [cite\_start]`users`: (id, school\_id, name, email, password\_hash, role, ...)[cite: 2849].
+      * [cite\_start]`students`: (id, user\_id, marks\_balance, ...)[cite: 2861].
+      * [cite\_start]`school_rules`: (id, school\_id, rule\_name, marks\_to\_award, is\_active, ...)[cite: 2869].
+      * [cite\_start]`voucher_catalog`: (id, name, marks\_cost, provider\_product\_id, is\_available, ...)[cite: 2879].
+      * [cite\_start]`redeemed_vouchers`: (id, student\_id, voucher\_catalog\_id, status, voucher\_code, ...)[cite: 2888].
+      * [cite\_start]`ledger_transactions`: (id, student\_id, type, amount, description, source\_rule\_id, source\_redemption\_id, created\_at)[cite: 2897].
+4.  **Crie os Índices:** Implemente *todos* os índices para performance, especialmente:
+      * [cite\_start]`idx_users_email` (para login rápido)[cite: 2914].
+      * [cite\_start]`idx_ledger_transactions_student_id` (para extrato)[cite: 2930].
+      * [cite\_start]`idx_ledger_transactions_created_at` (para ordenação do extrato)[cite: 2932].
+      * [cite\_start]Índices em todas as Foreign Keys (FKs)[cite: 2916, 2919, 2922, 2925, 2927, 2934, 2935].
+
+-----
+
+### III. Backend: API de Workflows (n8n)
+
+[cite\_start]Implemente cada endpoint da API (LLD Seção 1.1) [cite: 2678] como um workflow separado no n8n.
+
+**Princípios Obrigatórios do Backend:**
+
+1.  [cite\_start]**Segredos:** `JWT_SECRET`, senhas de DB e chaves de API devem vir *exclusivamente* de variáveis de ambiente (`process.env`)[cite: 239, 1102, 1219].
+2.  [cite\_start]**Contrato de API:** *Todas* as chaves JSON em requisições e respostas devem ser `camelCase` (ex: `marksToAward`, `ruleName`)[cite: 203, 2655, 2955].
+3.  [cite\_start]**RBAC (Role-Based Access Control):** Cada endpoint protegido *deve* ter um "Function Node" inicial que valida o JWT (assinatura HS256 e expiração) e verifica o `role` ('ADMIN' ou 'STUDENT') [cite: 236, 1254-1258, 1684-1689].
+4.  [cite\_start]**Isolamento (Multitenancy):** Todas as queries de Admin *devem* usar o `schoolId` extraído do JWT na cláusula `WHERE`, nunca um ID vindo do body[cite: 515, 1347, 1422, 1471].
+5.  [cite\_start]**Respostas de Erro:** Use respostas padronizadas (ex: `401 { "error": "Token inválido." }`, `403 { "error": "Acesso negado." }`, `400 { "error": "Saldo insuficiente." }`)[cite: 2701, 2727, 2046, 2964].
+
+#### Endpoint 1: `POST /auth/login`
+
+  * [cite\_start]**Objetivo:** Autenticar usuário e emitir JWT[cite: 2681].
+  * **Fluxo:**
+    1.  [cite\_start]`Webhook`: Recebe `{ email, password }`[cite: 2684].
+    2.  [cite\_start]`Function (Validação)`: Verifica se os campos não estão vazios[cite: 2703, 1117].
+    3.  [cite\_start]`Postgres (SELECT)`: `SELECT id, name, email, password_hash, role, school_id FROM users WHERE email = $1;`[cite: 2704, 1124]. [cite\_start]Se não encontrar, retorna 401[cite: 2704].
+    4.  [cite\_start]`Function (Verifica Senha)`: Compara o `password` recebido com o `password_hash` do banco (use PBKDF2 ou bcrypt)[cite: 2705, 1133]. [cite\_start]Se falhar, retorna 401[cite: 2706].
+    5.  `Function (Gera JWT)`: Se a senha for válida, crie um token JWT (HS256) assinado com `process.env.JWT_SECRET`.
+          * [cite\_start]**Payload do JWT:** `{ "userId": user.id, "role": user.role, "schoolId": user.school_id, "exp": ..., "iat": ... }` [cite: 1095-1098, 1154].
+    6.  [cite\_start]`Respond (200 OK)`: Retorna o JSON conforme o contrato [cite: 2690-2698]:
+        ```json
+        {
+          "accessToken": "...",
+          "user": { "id": "...", "name": "...", "email": "...", "role": "..." }
+        }
+        ```
+
+#### Endpoint 2: `GET /auth/me`
+
+  * [cite\_start]**Objetivo:** Retornar dados do usuário logado[cite: 2678].
+  * **Fluxo:**
+    1.  [cite\_start]`Webhook`: Recebe o header `Authorization: Bearer <token>`[cite: 1101].
+    2.  `Function (Valida JWT)`: Valida assinatura e expiração. [cite\_start]Extrai o payload (`userId`, `role`, `schoolId`) [cite: 1192-1201].
+    3.  [cite\_start]`(Opcional) Postgres (SELECT)`: `SELECT name, email, role FROM users WHERE id = $1` (usando `userId` do payload) para enriquecer os dados [cite: 1202-1207].
+    4.  [cite\_start]`Respond (200 OK)`: Retorna `{ "user": { "id": "...", "name": "...", "email": "...", "role": "...", "schoolId": "..." } }` [cite: 1209-1217].
+
+#### Endpoint 3: `GET /schools/rules`
+
+  * [cite\_start]**Objetivo:** Listar regras da escola do Admin[cite: 2678].
+  * **Fluxo:**
+    1.  `Webhook`: Recebe header `Authorization`.
+    2.  [cite\_start]`Function (Verify Admin JWT)`: Valida JWT e **exige `role === 'ADMIN'`**[cite: 1254, 1295]. Retorna 403 se não for Admin.
+    3.  `Postgres (SELECT)`:
+          * [cite\_start]Query: `SELECT id, rule_name AS "ruleName", marks_to_award AS "marksToAward", is_active AS "isActive" FROM school_rules WHERE school_id = $1 ORDER BY created_at DESC;` [cite: 1335-1343].
+          * Parâmetros: `$1 = {{$json["schoolId"]}}` (vindo do nó `Verify Admin JWT`).
+    4.  [cite\_start]`Respond (200 OK)`: Retorna um **array JSON direto** (sem wrapper) [cite: 1355, 1357-1372].
+
+#### Endpoint 4: `POST /schools/rules`
+
+  * [cite\_start]**Objetivo:** Criar uma nova regra[cite: 2678].
+  * **Fluxo:**
+    1.  [cite\_start]`Webhook`: Recebe header `Authorization` e body `{ "ruleName": "...", "marksToAward": 150 }`[cite: 2713].
+    2.  [cite\_start]`Function (Verify Admin JWT)`: Valida JWT e **exige `role === 'ADMIN'`**[cite: 1393].
+    3.  [cite\_start]`Function (Validate Body)`: Garante que `ruleName` existe e `marksToAward` é um número \> 0 [cite: 1401-1412].
+    4.  `Postgres (INSERT)`:
+          * [cite\_start]Query: `INSERT INTO school_rules (school_id, rule_name, marks_to_award, is_active) VALUES ($1, $2, $3, true) RETURNING id, rule_name AS "ruleName", marks_to_award AS "marksToAward", is_active AS "isActive";` [cite: 1428-1444].
+          * Parâmetros: `$1 = {{$json["schoolId"]}}` (do JWT), `$2 = {{$json["ruleName"]}}`, `$3 = {{$json["marksToAward"]}}`.
+    5.  [cite\_start]`Respond (201 Created)`: Retorna o objeto JSON da regra criada (vindo do `RETURNING`)[cite: 2718, 1456].
+
+#### Endpoint 5: `POST /awards`
+
+  * [cite\_start]**Objetivo:** Premiar um aluno (Creditar Marks)[cite: 2678].
+  * **Fluxo:**
+    1.  [cite\_start]`Webhook`: Recebe header `Authorization` e body `{ "studentId": "...", "ruleId": "..." }`[cite: 1545].
+    2.  [cite\_start]`Function (Verify Admin JWT)`: Valida JWT e **exige `role === 'ADMIN'`**[cite: 1528].
+    3.  [cite\_start]`Function (Validate Body)`: Garante que `studentId` e `ruleId` existem[cite: 1554].
+    4.  [cite\_start]`Postgres (Get Rule)`: `SELECT marks_to_award, rule_name FROM school_rules WHERE id = $1 AND school_id = $2` (usando `ruleId` do body e `schoolId` do JWT) [cite: 1559-1562]. [cite\_start]Se não achar, retorna 404[cite: 1566].
+    5.  [cite\_start]`Postgres (Get Student)`: `SELECT id FROM students WHERE id = $1 AND school_id = $2` (usando `studentId` do body e `schoolId` do JWT) [cite: 1567-1571]. [cite\_start]Se não achar, retorna 404[cite: 1574].
+    6.  [cite\_start]**`Postgres (Transação)`: Este fluxo é ATÔMICO[cite: 1511, 1622].**
+          * Query:
+            ```sql
+            BEGIN;
+            UPDATE students SET marks_balance = marks_balance + $1 WHERE id = $2;
+            INSERT INTO ledger_transactions (id, student_id, type, amount, description, source_rule_id, created_at)
+            VALUES (gen_random_uuid(), $2, 'CREDIT', $1, $3, $4, NOW());
+            COMMIT;
+            ```
+            [cite\_start][cite: 1586-1604]
+          * [cite\_start]Parâmetros: `$1=marks_to_award`, `$2=studentId`, `$3="Crédito por Regra: " + rule_name`, `$4=ruleId` [cite: 1606-1608].
+    7.  [cite\_start]`Respond (200 OK)`: Retorna `{ "message": "Premiação aplicada...", "studentId": "...", "ruleId": "...", "marksCredited": ... }` [cite: 1612-1617].
+
+#### Endpoint 6: `GET /students/dashboard`
+
+  * [cite\_start]**Objetivo:** Obter saldo e extrato do aluno logado[cite: 2678].
+  * **Fluxo:**
+    1.  `Webhook`: Recebe header `Authorization`.
+    2.  [cite\_start]`Function (Verify Student JWT)`: Valida JWT e **exige `role === 'STUDENT'`**[cite: 1684, 1724]. Retorna 403 se não for Aluno.
+    3.  `Postgres (Load Profile)`: Busca o saldo.
+          * [cite\_start]Query: `SELECT s.id AS "studentId", s.marks_balance AS "balance" FROM students s JOIN users u ON s.user_id = u.id WHERE u.id = $1;` [cite: 1744-1751].
+          * Parâmetros: `$1 = {{$json["userId"]}}` (do JWT). [cite\_start]Se não achar, retorna 404[cite: 1754].
+    4.  `Postgres (Load Transactions)`: Busca o extrato.
+          * [cite\_start]Query: `SELECT id, type, amount, description, created_at AS "createdAt" FROM ledger_transactions WHERE student_id = $1 ORDER BY created_at DESC LIMIT 10;` [cite: 1766-1775].
+          * Parâmetros: `$1 = {{$json["studentId"]}}` (do nó anterior).
+    5.  [cite\_start]`Function (Assemble Response)`: Combina os resultados dos dois nós Postgres[cite: 1783].
+    6.  [cite\_start]`Respond (200 OK)`: Retorna `{ "balance": ..., "recentTransactions": [...] }`[cite: 1633, 1801].
+
+#### Endpoint 7: `GET /vouchers/catalog`
+
+  * [cite\_start]**Objetivo:** Listar prêmios disponíveis[cite: 2678].
+  * **Fluxo:**
+    1.  `Webhook`: Recebe header `Authorization`.
+    2.  [cite\_start]`Function (Verify Student JWT)`: Valida JWT e **exige `role === 'STUDENT'`**[cite: 1890, 1904].
+    3.  `Postgres (SELECT)`:
+          * [cite\_start]Query: `SELECT id, name, description, marks_cost AS "marksCost", is_available AS "isAvailable" FROM voucher_catalog WHERE is_available = true ORDER BY marks_cost ASC;` [cite: 1911-1919].
+    4.  [cite\_start]`Respond (200 OK)`: Retorna um **array JSON direto** `[...]` [cite: 1925, 1929-1944].
+
+#### Endpoint 8: `POST /vouchers/redeem` (FLUXO CRÍTICO)
+
+  * [cite\_start]**Objetivo:** Resgatar um voucher, debitar saldo e chamar API externa[cite: 2678, 1864].
+  * **Fluxo:**
+    1.  [cite\_start]`Webhook`: Recebe header `Authorization` e body `{ "voucherCatalogId": "..." }`[cite: 2738].
+    2.  [cite\_start]`Function (Verify Student JWT)`: Valida JWT e **exige `role === 'STUDENT'`**[cite: 1890].
+    3.  [cite\_start]`Function (Validate Body)`: Garante que `voucherCatalogId` foi enviado[cite: 1997].
+    4.  `Postgres (Load Data)`: Execute duas queries (ou um `JOIN`):
+          * [cite\_start]Buscar Aluno: `SELECT id AS "studentId", marks_balance AS "balance" FROM students s JOIN users u ON s.user_id = u.id WHERE u.id = $1` (usando `userId` do JWT) [cite: 2008-2015].
+          * [cite\_start]Buscar Voucher: `SELECT marks_cost AS "marksCost", provider_product_id AS "providerProductId" FROM voucher_catalog WHERE id = $1 AND is_available = true` (usando `voucherCatalogId` do body) [cite: 2021-2028].
+    5.  `Function (Pre-Check)`: Compara os resultados.
+          * Se `balance < marksCost`, retorna `400 Bad Request { "error": "Saldo insuficiente." [cite_start]}` [cite: 2045-2049].
+    6.  **`Postgres (Transação de Débito)`: Inicia a operação ATÔMICA.**
+          * [cite\_start]Use uma Stored Procedure (ex: `redeem_begin`) [cite: 2094, 2103] [cite\_start]ou um bloco `BEGIN/COMMIT` [cite: 2067] para:
+          * [cite\_start]`UPDATE students SET marks_balance = marks_balance - $cost WHERE id = $studentId;`[cite: 2129].
+          * [cite\_start]`INSERT INTO redeemed_vouchers (student_id, voucher_catalog_id, status) VALUES ($1, $2, 'PENDING') RETURNING id;` [cite: 2115-2127].
+          * [cite\_start]`INSERT INTO ledger_transactions (student_id, type, amount, description, source_redemption_id) VALUES ($1, 'DEBIT', $cost, 'Resgate de voucher', $redemptionId);` [cite: 2133-2146].
+          * *Saída:* `redemptionId` (o ID do `redeemed_vouchers`).
+    7.  **`HTTP Request (Call Provider)`:**
+          * [cite\_start]Use a credencial do provedor (ex: Reloadly)[cite: 2157].
+          * [cite\_start]Envie o `providerProductId` e o `redemptionId` como referência[cite: 2160].
+    8.  **`IF (Tratamento de Resposta)`:**
+          * **Caminho Feliz (Sucesso da API):**
+              * [cite\_start]A API externa retorna `{ "voucher_code": "ABC-123", "instructions": "..." }`[cite: 2166].
+              * [cite\_start]`Postgres (Finalize)`: `UPDATE redeemed_vouchers SET status = 'COMPLETED', voucher_code = $1 WHERE id = $2;` [cite: 2176-2178].
+              * [cite\_start]`Respond (200 OK)`: Retorna `{ "message": "Resgate concluído!", "voucherCode": "ABC-123", "instructions": "..." }` [cite: 2743-2747, 2184].
+          * **Caminho Triste (Falha da API):**
+              * A API externa retorna erro 500 ou timeout.
+              * [cite\_start]**`Postgres (Compensação/Rollback)`: Execute a transação de estorno\!** [cite: 2190-2198].
+              * Query:
+                ```sql
+                BEGIN;
+                UPDATE students SET marks_balance = marks_balance + $1 WHERE id = $2;
+                UPDATE redeemed_vouchers SET status = 'FAILED' WHERE id = $3;
+                INSERT INTO ledger_transactions (student_id, type, amount, description, source_redemption_id)
+                VALUES ($2, 'CREDIT', $1, 'Estorno de resgate com falha', $3);
+                COMMIT;
+                ```
+                [cite\_start][cite: 2207-2231]
+              * [cite\_start]Parâmetros: `$1=marksCost`, `$2=studentId`, `$3=redemptionId` [cite: 2233-2235].
+              * `Respond (500 Server Error)`: Retorna `{ "error": "Não foi possível concluir o resgate. Seus pontos foram devolvidos." [cite_start]}`[cite: 2237].
+
+-----
+
+### IV. Frontend: Aplicação (React + Zustand + TanStack Query)
+
+[cite\_start]Implemente o frontend com base na estrutura de pastas definida no LLD (Seção 2.1) [cite: 2751-2791].
+
+**1. Gerenciamento de Estado Global (Zustand)**
+
+  * [cite\_start]Crie `lib/store/auth.ts`[cite: 2801].
+  * [cite\_start]Estado: `user: User | null`, `token: string | null`, `isAuthenticated: boolean` [cite: 2802-2804].
+  * Ações:
+      * `login(email, password)`: Chama `POST /auth/login`. [cite\_start]No sucesso, salva `user` e `token` no estado e no `localStorage` (use o middleware `persist`)[cite: 26, 43].
+      * [cite\_start]`logout()`: Limpa o estado e o `localStorage`[cite: 52].
+  * *Mock local (para dev):* Os arquivos `auth.ts` e `data.ts` fornecidos usam dados mockados. Sua implementação deve substituir as chamadas mockadas por chamadas reais à API (via `fetch` ou `axios`). O `data.ts` serve como um mock para os dados que virão da API (regras, alunos, vouchers).
+
+**2. Gerenciamento de Estado do Servidor (TanStack Query)**
+
+  * Configure o `QueryClientProvider` na raiz da aplicação.
+  * [cite\_start]Use `useQuery` para buscar dados cacheados[cite: 2818, 666]:
+      * [cite\_start]`useQuery(['rules'], ...)`: Para `GET /schools/rules`[cite: 2826].
+      * [cite\_start]`useQuery(['dashboard'], ...)`: Para `GET /students/dashboard`[cite: 2827].
+      * [cite\_start]`useQuery(['catalog'], ...)`: Para `GET /vouchers/catalog`[cite: 2826].
+  * [cite\_start]Use `useMutation` para alterar dados e invalidar caches[cite: 2823]:
+      * `POST /schools/rules`: No `onSuccess`, invalide `['rules']`.
+      * `POST /awards`: No `onSuccess`, invalide `['dashboard']` (para o aluno) e `['students']` (para o admin).
+      * `POST /vouchers/redeem`: No `onSuccess`, invalide `['dashboard']` e `['redeemedHistory']`.
+
+**3. Estrutura de Páginas e Componentes Principais**
+
+  * **`app/page.tsx` (Roteador Principal):**
+
+      * Lê do `useAuthStore`.
+      * Se `!isAuthenticated`, renderiza `<LoginPage />`.
+      * Se `isAuthenticated && user.role === 'ADMIN'`, renderiza `<AdminDashboard />`.
+      * Se `isAuthenticated && user.role === 'STUDENT'`, renderiza `<StudentDashboard />`.
+
+  * **`components/pages/LoginPage.tsx`:**
+
+      * [cite\_start]Formulário com `email` e `password`[cite: 28, 38].
+      * [cite\_start]Chama `authStore.login()` no `onSubmit`[cite: 43].
+      * [cite\_start]Exibe `error` se o login falhar[cite: 52].
+
+  * **`components/pages/AdminDashboard.tsx`:**
+
+      * [cite\_start]Layout com abas (Tabs) para "Gerenciar Conquistas" e "Premiar Alunos"[cite: 24, 30].
+      * [cite\_start]Renderiza `<RulesManager />` ou `<AwardMarks />` com base na aba ativa[cite: 42, 43].
+      * Inclui botão de `logout()`.
+
+  * **`components/admin/RulesManager.tsx`:**
+
+      * [cite\_start]Usa `useQuery(['rules'])` para buscar e listar as regras existentes [cite: 29-37].
+      * [cite\_start]Renderiza um formulário (`ruleName`, `marksToAward`)[cite: 41, 50].
+      * [cite\_start]Usa `useMutation` para chamar `POST /schools/rules` e invalidar o cache `['rules']` [cite: 50-60].
+
+  * **`components/admin/AwardMarks.tsx`:**
+
+      * Usa `useQuery` para buscar a lista de alunos e regras (ou usa os dados mockados do `useDataStore` no MVP).
+      * [cite\_start]Dois `<select>` para `selectedStudent` e `selectedRule` [cite: 25-30, 46].
+      * [cite\_start]Usa `useMutation` para chamar `POST /awards` com `{ studentId, ruleId }` [cite: 75-81].
+      * [cite\_start]Exibe mensagem de sucesso e limpa os campos[cite: 36, 40].
+
+  * **`components/pages/StudentDashboard.tsx`:**
+
+      * [cite\_start]Layout com abas (Tabs) para "Extrato", "Catálogo" e "Meus Resgates"[cite: 18, 29, 36].
+      * [cite\_start]Renderiza `<StudentBalance />` (sempre visível)[cite: 26].
+      * [cite\_start]Renderiza `<StudentTransactions />`, `<VoucherCatalog />`, ou `<RedeemedVouchersHistory />` com base na aba ativa [cite: 40-42].
+      * Inclui botão de `logout()`.
+
+  * **`components/student/StudentBalance.tsx`:**
+
+      * Recebe o `student` por props (vindo do `useQuery(['dashboard'])`).
+      * Exibe `student.marksBalance` de forma destacada.
+
+  * **`components/student/StudentTransactions.tsx`:**
+
+      * Recebe `student` por props.
+      * Mapeia `student.transactions` (ou `data.recentTransactions` da API).
+      * [cite\_start]Renderiza cada transação, diferenciando `CREDIT` (verde, `ArrowUp`) de `DEBIT` (vermelho, `ArrowDown`)[cite: 24, 30, 43].
+
+  * **`components/student/VoucherCatalog.tsx`:**
+
+      * Usa `useQuery(['catalog'])` para buscar os vouchers.
+      * Mapeia os vouchers.
+      * Verifica `student.marksBalance >= voucher.marksCost`. [cite\_start]Se for falso, desabilita o botão e mostra "Saldo insuficiente"[cite: 31, 39].
+      * [cite\_start]Ao clicar em "Resgatar", abre o modal `<RedeemConfirmation />`[cite: 45, 60].
+
+  * **`components/student/RedeemConfirmation.tsx`:**
+
+      * Modal que recebe `voucherId` e `student`.
+      * [cite\_start]Recalcula e exibe o "Novo Saldo" (`student.marksBalance - voucher.marksCost`)[cite: 44].
+      * [cite\_start]Usa `useMutation` para chamar `POST /vouchers/redeem` com `{ voucherCatalogId }`[cite: 50].
+      * [cite\_start]Exibe `error` em caso de falha (ex: "Saldo insuficiente" vindo da API)[cite: 56].
+      * [cite\_start]Em sucesso, exibe o `voucherCode` recebido, com um botão de "Copiar" (`navigator.clipboard.writeText`)[cite: 63, 72].
+
+  * **`components/student/RedeemedVouchersHistory.tsx`:**
+
+      * Usa `useQuery(['redeemedHistory'])` (um novo endpoint ou parte do `dashboard`) para buscar resgates com `status === 'COMPLETED'`. (O `useDataStore` mocka isso com `getRedeemedVouchers`).
+      * [cite\_start]Mapeia os vouchers resgatados[cite: 25].
+      * [cite\_start]Exibe `voucher.voucherName`, `voucher.costInMarks`, `voucher.createdAt`[cite: 31].
+      * [cite\_start]Inclui um botão "Copiar Código" (`handleCopyCode`)[cite: 19, 36].
+
+-----
+
+### V. Princípios Fundamentais (Checklist de Qualidade)
+
+1.  **Atomicidade (HLD):** O `ledger_transactions` é imutável. [cite\_start]Qualquer mudança no `students.marks_balance` DEVE ser acompanhada por um `INSERT` no ledger [cite: 1509] e DEVE ser transacional (`BEGIN/COMMIT`).
+2.  [cite\_start]**Segurança (HLD/LLD):** HTTPS é obrigatório[cite: 237, 349, 1220]. [cite\_start]RBAC deve ser verificado no início de *todo* workflow protegido[cite: 236, 1254, 1688]. [cite\_start]`JWT_SECRET` NUNCA deve estar no código[cite: 239, 1219].
+3.  [cite\_start]**Consistência (LLD):** `camelCase` em *toda* a comunicação JSON API[cite: 203, 2655, 2955]. [cite\_start]Respostas de erro devem ser padronizadas[cite: 2964].
+4.  [cite\_start]**Tratamento de Falha (HLD):** O fluxo `POST /vouchers/redeem` DEVE implementar a lógica de compensação (estorno) se a API externa falhar *após* o débito interno [cite: 192, 2190-2198].
