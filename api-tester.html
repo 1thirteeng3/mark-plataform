@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mark Platform API Tester</title>
+    <title>Mark Platform v1.1 API Tester</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -12,15 +13,24 @@
             padding: 20px;
             background: #f5f5f5;
         }
+
         .container {
             background: white;
             padding: 20px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
         }
-        h1 { color: #ea580c; }
-        h2 { color: #ea580c; margin-top: 30px; }
+
+        h1 {
+            color: #ea580c;
+        }
+
+        h2 {
+            color: #ea580c;
+            margin-top: 30px;
+        }
+
         button {
             background: #ea580c;
             color: white;
@@ -30,8 +40,17 @@
             cursor: pointer;
             font-size: 14px;
             margin-right: 10px;
+            margin-bottom: 10px;
         }
-        button:hover { background: #c2410c; }
+
+        button.secondary {
+            background: #4b5563;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
         .result {
             background: #f9fafb;
             border: 1px solid #e5e7eb;
@@ -41,10 +60,18 @@
             font-family: 'Courier New', monospace;
             font-size: 12px;
             overflow-x: auto;
+            max-height: 300px;
         }
-        .success { border-left: 4px solid #10b981; }
-        .error { border-left: 4px solid #ef4444; }
-        .status { 
+
+        .success {
+            border-left: 4px solid #10b981;
+        }
+
+        .error {
+            border-left: 4px solid #ef4444;
+        }
+
+        .status {
             display: inline-block;
             padding: 4px 8px;
             border-radius: 4px;
@@ -52,54 +79,121 @@
             font-weight: bold;
             margin-left: 10px;
         }
-        .status.ok { background: #d1fae5; color: #065f46; }
-        .status.fail { background: #fee2e2; color: #991b1b; }
-        input {
+
+        .status.ok {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status.fail {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        input,
+        textarea,
+        select {
             width: 100%;
             padding: 8px;
             border: 1px solid #d1d5db;
             border-radius: 4px;
             margin: 5px 0;
+            box-sizing: border-box;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .col {
+            flex: 1;
         }
     </style>
 </head>
+
 <body>
     <div class="container">
-        <h1>Mark Platform API Tester</h1>
-        <p>Test the fixed edge functions to verify all errors are resolved.</p>
-        
-        <h2>Step 1: Login</h2>
-        <input type="email" id="email" value="admin@mark.local" placeholder="Email">
-        <input type="password" id="password" value="test" placeholder="Password">
+        <h1>Mark Platform v1.1 API Tester</h1>
+        <p>Verify the deployment of Evolution v1.1 Edge Functions.</p>
+
+        <h2>Step 1: Authentication (auth-login-v2)</h2>
+        <div class="row">
+            <div class="col">
+                <input type="email" id="email" value="admin@springfield.edu" placeholder="Email">
+            </div>
+            <div class="col">
+                <input type="password" id="password" value="password123" placeholder="Password">
+            </div>
+        </div>
         <button onclick="login()">Login</button>
+        <button class="secondary" onclick="fillAdmin()">Fill Admin</button>
+        <button class="secondary" onclick="fillStudent()">Fill Student</button>
         <div id="loginResult"></div>
-        
-        <h2>Step 2: Test APIs</h2>
-        <button onclick="testStats()">Test Platform Stats</button>
-        <button onclick="testStudents()">Test Students</button>
-        <button onclick="testTransactions()">Test Transactions</button>
-        <button onclick="testAll()">Test All</button>
-        
-        <div id="statsResult"></div>
-        <div id="studentsResult"></div>
-        <div id="transactionsResult"></div>
+
+        <h2>Step 2: Financial Analytics (schools-analytics-financial)</h2>
+        <p><em>Requires Admin Login</em></p>
+        <button onclick="testFinancial()">Test Financial Analytics</button>
+        <div id="financialResult"></div>
+
+        <h2>Step 3: Performance Analytics (schools-analytics-performance)</h2>
+        <p><em>Requires Admin Login</em></p>
+        <button onclick="testPerformance()">Test Performance Analytics</button>
+        <div id="performanceResult"></div>
+
+        <h2>Step 4: Batch Import (students-batch-import)</h2>
+        <p><em>Requires Admin Login</em></p>
+        <textarea id="importData" rows="5">
+{
+    "students": [
+        {
+            "name": "Lisa Simpson",
+            "email": "lisa@springfield.edu",
+            "enrollmentId": "ST-002",
+            "grade": "2nd Grade"
+        }
+    ]
+}
+        </textarea>
+        <button onclick="testImport()">Test Batch Import</button>
+        <div id="importResult"></div>
+
+        <h2>Step 5: Voucher Redemption (vouchers-redeem-v2)</h2>
+        <p><em>Requires Student Login</em></p>
+        <button onclick="fetchVouchers()">1. Fetch Available Vouchers</button>
+        <div id="vouchersList"></div>
+        <br>
+        <input type="text" id="voucherId" placeholder="Paste Voucher ID here">
+        <button onclick="testRedemption()">2. Redeem Voucher</button>
+        <div id="redemptionResult"></div>
     </div>
 
     <script>
         const FUNCTIONS_URL = 'https://cqrjiaskaperrmfiuewd.supabase.co/functions/v1';
+        const SUPABASE_URL = 'https://cqrjiaskaperrmfiuewd.supabase.co';
         const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNxcmppYXNrYXBlcnJtZml1ZXdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MjkwMDUsImV4cCI6MjA3NjEwNTAwNX0.GbRCx97w6WQEQ4TKozB9tQxhAu6yMVVtFkoDypmlAiY';
-        
+
         let userToken = null;
+
+        function fillAdmin() {
+            document.getElementById('email').value = 'admin@springfield.edu';
+            document.getElementById('password').value = 'password123';
+        }
+
+        function fillStudent() {
+            document.getElementById('email').value = 'bart@springfield.edu';
+            document.getElementById('password').value = 'password123';
+        }
 
         async function login() {
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const resultDiv = document.getElementById('loginResult');
-            
+
             resultDiv.innerHTML = 'Logging in...';
-            
+
             try {
-                const response = await fetch(`${FUNCTIONS_URL}/auth-login`, {
+                const response = await fetch(`${FUNCTIONS_URL}/auth-login-v2`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -108,11 +202,12 @@
                     },
                     body: JSON.stringify({ email, password })
                 });
-                
+
                 const data = await response.json();
-                
-                if (data.error) {
-                    resultDiv.innerHTML = `<div class="result error"><strong>Login Failed</strong><br>${JSON.stringify(data, null, 2)}</div>`;
+                console.log('Login response:', data);
+
+                if (data.error || !data.token) {
+                    resultDiv.innerHTML = `<div class="result error"><strong>Login Failed</strong><br>Response: <pre>${JSON.stringify(data, null, 2)}</pre></div>`;
                     userToken = null;
                 } else {
                     userToken = data.token;
@@ -123,104 +218,135 @@
             }
         }
 
-        async function testStats() {
-            if (!userToken) {
-                alert('Please login first');
-                return;
-            }
-            
-            const resultDiv = document.getElementById('statsResult');
-            resultDiv.innerHTML = '<div class="result">Testing platform-stats...</div>';
-            
+        async function testFinancial() {
+            if (!userToken) { alert('Please login first'); return; }
+            const resultDiv = document.getElementById('financialResult');
+            resultDiv.innerHTML = 'Testing...';
+
             try {
-                const response = await fetch(`${FUNCTIONS_URL}/platform-stats`, {
+                const response = await fetch(`${FUNCTIONS_URL}/schools-analytics-financial`, {
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${ANON_KEY}`,
-                        'apikey': ANON_KEY,
-                        'x-user-token': userToken
+                        'Authorization': `Bearer ${userToken}`,
+                        'apikey': ANON_KEY
                     }
                 });
-                
+
                 const data = await response.json();
-                const status = data.error ? 'fail' : 'ok';
-                const statusText = data.error ? 'FAIL' : 'OK';
                 const cssClass = data.error ? 'error' : 'success';
-                
-                resultDiv.innerHTML = `<div class="result ${cssClass}"><strong>Platform Stats</strong><span class="status ${status}">${statusText}</span><br><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+                resultDiv.innerHTML = `<div class="result ${cssClass}"><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
             } catch (error) {
-                resultDiv.innerHTML = `<div class="result error"><strong>Error</strong><span class="status fail">FAIL</span><br>${error.message}</div>`;
+                resultDiv.innerHTML = `<div class="result error">${error.message}</div>`;
             }
         }
 
-        async function testStudents() {
-            if (!userToken) {
-                alert('Please login first');
-                return;
-            }
-            
-            const resultDiv = document.getElementById('studentsResult');
-            resultDiv.innerHTML = '<div class="result">Testing platform-students...</div>';
-            
+        async function testPerformance() {
+            if (!userToken) { alert('Please login first'); return; }
+            const resultDiv = document.getElementById('performanceResult');
+            resultDiv.innerHTML = 'Testing...';
+
             try {
-                const response = await fetch(`${FUNCTIONS_URL}/platform-students?page=1&limit=20`, {
+                const response = await fetch(`${FUNCTIONS_URL}/schools-analytics-performance`, {
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${ANON_KEY}`,
-                        'apikey': ANON_KEY,
-                        'x-user-token': userToken
+                        'Authorization': `Bearer ${userToken}`,
+                        'apikey': ANON_KEY
                     }
                 });
-                
+
                 const data = await response.json();
-                const status = data.error ? 'fail' : 'ok';
-                const statusText = data.error ? 'FAIL' : 'OK';
                 const cssClass = data.error ? 'error' : 'success';
-                
-                resultDiv.innerHTML = `<div class="result ${cssClass}"><strong>Platform Students</strong><span class="status ${status}">${statusText}</span><br><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+                resultDiv.innerHTML = `<div class="result ${cssClass}"><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
             } catch (error) {
-                resultDiv.innerHTML = `<div class="result error"><strong>Error</strong><span class="status fail">FAIL</span><br>${error.message}</div>`;
+                resultDiv.innerHTML = `<div class="result error">${error.message}</div>`;
             }
         }
 
-        async function testTransactions() {
-            if (!userToken) {
-                alert('Please login first');
-                return;
-            }
-            
-            const resultDiv = document.getElementById('transactionsResult');
-            resultDiv.innerHTML = '<div class="result">Testing platform-transactions...</div>';
-            
+        async function testImport() {
+            if (!userToken) { alert('Please login first'); return; }
+            const resultDiv = document.getElementById('importResult');
+            const body = document.getElementById('importData').value;
+            resultDiv.innerHTML = 'Testing...';
+
             try {
-                const response = await fetch(`${FUNCTIONS_URL}/platform-transactions?page=1&limit=50`, {
+                const response = await fetch(`${FUNCTIONS_URL}/students-batch-import`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${userToken}`,
+                        'apikey': ANON_KEY
+                    },
+                    body: body
+                });
+
+                const data = await response.json();
+                const cssClass = data.error ? 'error' : 'success';
+                resultDiv.innerHTML = `<div class="result ${cssClass}"><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="result error">${error.message}</div>`;
+            }
+        }
+
+        async function fetchVouchers() {
+            const resultDiv = document.getElementById('vouchersList');
+            resultDiv.innerHTML = 'Fetching vouchers...';
+
+            try {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/voucher_catalog?select=*`, {
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${ANON_KEY}`,
                         'apikey': ANON_KEY,
-                        'x-user-token': userToken
+                        'Authorization': `Bearer ${ANON_KEY}`
                     }
                 });
-                
+
                 const data = await response.json();
-                const status = data.error ? 'fail' : 'ok';
-                const statusText = data.error ? 'FAIL' : 'OK';
-                const cssClass = data.error ? 'error' : 'success';
-                
-                resultDiv.innerHTML = `<div class="result ${cssClass}"><strong>Platform Transactions</strong><span class="status ${status}">${statusText}</span><br><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+
+                if (data.length > 0) {
+                    let html = '<strong>Available Vouchers:</strong><ul>';
+                    data.forEach(v => {
+                        html += `<li>${v.name} (Cost: ${v.marks_cost}) - ID: <code>${v.id}</code> <button onclick="document.getElementById('voucherId').value = '${v.id}'" style="padding: 2px 5px; font-size: 10px;">Select</button></li>`;
+                    });
+                    html += '</ul>';
+                    resultDiv.innerHTML = `<div class="result success">${html}</div>`;
+                } else {
+                    resultDiv.innerHTML = `<div class="result error">No vouchers found.</div>`;
+                }
             } catch (error) {
-                resultDiv.innerHTML = `<div class="result error"><strong>Error</strong><span class="status fail">FAIL</span><br>${error.message}</div>`;
+                resultDiv.innerHTML = `<div class="result error">${error.message}</div>`;
             }
         }
 
-        async function testAll() {
-            await testStats();
-            await testStudents();
-            await testTransactions();
+        async function testRedemption() {
+            if (!userToken) { alert('Please login as Student first'); return; }
+            const voucherId = document.getElementById('voucherId').value;
+            if (!voucherId) { alert('Please select a voucher ID'); return; }
+
+            const resultDiv = document.getElementById('redemptionResult');
+            resultDiv.innerHTML = 'Processing redemption...';
+
+            try {
+                const response = await fetch(`${FUNCTIONS_URL}/vouchers-redeem-v2`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${userToken}`,
+                        'apikey': ANON_KEY
+                    },
+                    body: JSON.stringify({ voucherId })
+                });
+
+                const data = await response.json();
+                const cssClass = data.error ? 'error' : 'success';
+                resultDiv.innerHTML = `<div class="result ${cssClass}"><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="result error">${error.message}</div>`;
+            }
         }
     </script>
 </body>
+
 </html>
