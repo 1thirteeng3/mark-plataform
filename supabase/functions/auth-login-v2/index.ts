@@ -2,6 +2,8 @@
 // Module 0: Core Hardening - Security-First Authentication
 // Implements NIST-compliant PBKDF2 password hashing
 
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+
 Deno.serve(async (req) => {
     const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
@@ -53,23 +55,49 @@ Deno.serve(async (req) => {
         }
 
         const user = users[0];
+        let authSuccessful = false;
+        let requiresMigration = false;
 
-        // TODO: In production, implement PBKDF2 verification here
-        // For now, maintaining backward compatibility with existing hashes
-        // PBKDF2 Implementation Plan:
-        // 1. Use Web Crypto API: crypto.subtle.importKey + crypto.subtle.deriveBits
-        // 2. Parameters: 100,000 iterations, 64 bytes keylen, SHA-512
-        // 3. Store salt with hash in format: salt:hash
-        // 4. During transition: Check if hash format is old or new
-        
-        // Simple password check (backward compatibility)
-        const passwordMatch = user.password_hash === `${password}_hash`;
+        // AUTHENTICATION LOGIC
+        if (user.password_salt) {
+            // New PBKDF2 Auth
+            authSuccessful = await verifyPasswordPBKDF2(password, user.password_hash, user.password_salt);
+        } else {
+            // Legacy Auth
+            authSuccessful = (user.password_hash === `${password}_hash`);
+            if (authSuccessful) {
+                requiresMigration = true;
+            }
+        }
 
-        if (!passwordMatch) {
+        if (!authSuccessful) {
             return new Response(
                 JSON.stringify({ error: 'Credenciais inválidas' }),
                 { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
             );
+        }
+
+        // MIGRATION LOGIC (Upgrade Security transparently)
+        if (requiresMigration) {
+            const salt = crypto.randomUUID(); // Good enough for salt
+            const newHash = await hashPasswordPBKDF2(password, salt);
+
+            // Background update (fire and forget fetch)
+            await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${user.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'apikey': serviceKey,
+                    'Authorization': `Bearer ${serviceKey}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({
+                    password_hash: newHash,
+                    password_salt: salt,
+                    updated_at: new Date().toISOString()
+                })
+            });
+            console.log(`User ${user.id} migrated to PBKDF2`);
         }
 
         // Generate JWT token
@@ -79,6 +107,7 @@ Deno.serve(async (req) => {
             email: user.email,
             role: user.role,
             schoolId: user.school_id,
+            tokenVersion: user.token_version || 1, // Kill Switch
             iss: 'mark-platform',
             exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
         };
@@ -142,6 +171,7 @@ Deno.serve(async (req) => {
                     schoolId: user.school_id,
                     school: schoolData,
                     student: studentData,
+                    securityLevel: requiresMigration ? 'UPGRADED' : 'SECURE'
                 },
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
@@ -156,7 +186,7 @@ Deno.serve(async (req) => {
     }
 });
 
-// Helper function to create HMAC signature
+// Helper: HMAC Signature for JWT
 async function createHmacSignature(data: string, secret: string): Promise<string> {
     const encoder = new TextEncoder();
     const keyData = encoder.encode(secret);
@@ -172,4 +202,42 @@ async function createHmacSignature(data: string, secret: string): Promise<string
 
     const signature = await crypto.subtle.sign('HMAC', key, dataBuffer);
     return btoa(String.fromCharCode(...new Uint8Array(signature)));
+}
+
+// Helper: PBKDF2 Hashing
+// Iterations: 100,000 (NIST Recommendation)
+// KeyLen: 64
+// Algo: SHA-512
+async function hashPasswordPBKDF2(password: string, salt: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(password),
+        { name: "PBKDF2" },
+        false,
+        ["deriveBits", "deriveKey"]
+    );
+
+    const key = await crypto.subtle.deriveKey(
+        {
+            name: "PBKDF2",
+            salt: encoder.encode(salt),
+            iterations: 100000,
+            hash: "SHA-512",
+        },
+        keyMaterial,
+        { name: "HMAC", hash: "SHA-512", length: 512 },
+        true,
+        ["sign", "verify"]
+    );
+
+    // Export key to raw bytes
+    const exportedKey = await crypto.subtle.exportKey("raw", key);
+    // Convert to Hex string for storage
+    return Array.from(new Uint8Array(exportedKey)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyPasswordPBKDF2(password: string, storedHash: string, salt: string): Promise<boolean> {
+    const newHash = await hashPasswordPBKDF2(password, salt);
+    return newHash === storedHash;
 }

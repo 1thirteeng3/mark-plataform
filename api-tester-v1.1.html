@@ -164,8 +164,28 @@
         <div id="vouchersList"></div>
         <br>
         <input type="text" id="voucherId" placeholder="Paste Voucher ID here">
+        <div>
+            <input type="checkbox" id="forceFailure">
+            <label for="forceFailure">Simulate External API Failure (Test Rollback)</label>
+        </div>
         <button onclick="testRedemption()">2. Redeem Voucher</button>
         <div id="redemptionResult"></div>
+        <h2>Step 6: Grant Marks (Phase 1: Atomic)</h2>
+        <p><em>Requires Admin Login</em></p>
+        <div class="row">
+            <div class="col"><input type="text" id="grantStudentId" placeholder="Student ID (copy from Analytics)">
+            </div>
+            <div class="col"><input type="text" id="grantRuleId" placeholder="Rule ID (need to fetch)"></div>
+        </div>
+        <div class="row">
+            <div class="col"><input type="number" id="grantAmount" value="50" placeholder="Amount"></div>
+            <div class="col"><input type="text" id="grantDesc" value="Excellent participation"
+                    placeholder="Description"></div>
+        </div>
+        <button onclick="fetchRules()">Fetch Rules (to get ID)</button>
+        <button onclick="testGrantMarks()">Test Grant Marks</button>
+        <div id="grantResult"></div>
+
     </div>
 
     <script>
@@ -328,6 +348,8 @@
             const resultDiv = document.getElementById('redemptionResult');
             resultDiv.innerHTML = 'Processing redemption...';
 
+            const forceFailure = document.getElementById('forceFailure').checked;
+            
             try {
                 const response = await fetch(`${FUNCTIONS_URL}/vouchers-redeem-v2`, {
                     method: 'POST',
@@ -336,12 +358,68 @@
                         'Authorization': `Bearer ${userToken}`,
                         'apikey': ANON_KEY
                     },
-                    body: JSON.stringify({ voucherId })
+                    body: JSON.stringify({ voucherId, forceFailure })
                 });
 
                 const data = await response.json();
                 const cssClass = data.error ? 'error' : 'success';
                 resultDiv.innerHTML = `<div class="result ${cssClass}"><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="result error">${error.message}</div>`;
+            }
+        }
+
+        async function fetchRules() {
+            if (!userToken) { alert('Please login first'); return; }
+            const resultDiv = document.getElementById('grantResult');
+
+            try {
+                // Using ANON_KEY to bypass custom token check on REST API
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/school_rules?select=*`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': ANON_KEY,
+                        'Authorization': `Bearer ${ANON_KEY}`
+                    }
+                });
+                const data = await response.json();
+                if (data.length > 0) {
+                    document.getElementById('grantRuleId').value = data[0].id; // Auto pick first
+                    resultDiv.innerHTML = `<div class="result success">Found rules. Auto-selected: ${data[0].rule_name} (${data[0].id})</div>`;
+                } else {
+                    resultDiv.innerHTML = `<div class="result error">No rules found. Please create one in DB or use seed.</div>`;
+                }
+
+            } catch (e) {
+                resultDiv.innerHTML = `<div class="result error">${e.message}</div>`;
+            }
+        }
+
+        async function testGrantMarks() {
+            if (!userToken) { alert('Please login first'); return; }
+            const studentId = document.getElementById('grantStudentId').value;
+            const ruleId = document.getElementById('grantRuleId').value;
+            const amount = document.getElementById('grantAmount').value;
+            const description = document.getElementById('grantDesc').value;
+
+            const resultDiv = document.getElementById('grantResult');
+            resultDiv.innerHTML = 'Granting...';
+
+            try {
+                const response = await fetch(`${FUNCTIONS_URL}/awards`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${userToken}`,
+                        'apikey': ANON_KEY
+                    },
+                    body: JSON.stringify({ studentId, ruleId, amount: parseInt(amount), description })
+                });
+                const data = await response.json();
+                const cssClass = data.error ? 'error' : 'success';
+                resultDiv.innerHTML = `<div class="result ${cssClass}"><pre>${JSON.stringify(data, null, 2)}</pre></div>`;
+
             } catch (error) {
                 resultDiv.innerHTML = `<div class="result error">${error.message}</div>`;
             }
