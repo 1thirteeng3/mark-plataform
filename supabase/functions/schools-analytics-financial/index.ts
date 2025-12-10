@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
 
     try {
         // Validate admin token
-        const authHeader = req.headers.get('authorization');
+        const authHeader = req.headers.get('x-user-token') || req.headers.get('authorization');
         if (!authHeader) {
             return new Response(
                 JSON.stringify({ error: 'Token de autenticação ausente' }),
