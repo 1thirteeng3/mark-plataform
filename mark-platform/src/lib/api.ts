@@ -110,6 +110,36 @@ class ApiClient {
     });
   }
 
+  // --- SCHOOL ADMIN METHODS ---
+  async getSchoolStudents(token: string, page = 1, limit = 20): Promise<import('../types').PlatformStudentsResponse> {
+    return this.callFunction(`schools-students-list?page=${page}&limit=${limit}`, {
+      method: 'GET',
+      userToken: token,
+    });
+  }
+
+  async createSchoolStudent(token: string, student: any): Promise<any> {
+    return this.callFunction('schools-students-create', {
+      body: student,
+      userToken: token,
+    });
+  }
+
+  async updateSchoolStudent(token: string, student: any): Promise<any> {
+    return this.callFunction('schools-students-update', {
+      method: 'POST', // or PUT, function accepts POST
+      body: student,
+      userToken: token,
+    });
+  }
+
+  async getSchoolFinancials(token: string): Promise<any> {
+    return this.callFunction('schools-analytics-financial', {
+      method: 'GET',
+      userToken: token,
+    });
+  }
+
   // SUPER_ADMIN Platform API endpoints
   async getPlatformStats(token: string): Promise<import('../types').PlatformStats> {
     return this.callFunction('platform-stats', {
