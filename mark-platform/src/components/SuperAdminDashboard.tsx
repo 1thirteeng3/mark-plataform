@@ -5,8 +5,9 @@ import { SchoolList } from './super-admin/SchoolList';
 import { StudentList } from './super-admin/StudentList';
 import { TransactionLedger } from './super-admin/TransactionLedger';
 import { VoucherManager } from './super-admin/VoucherManager';
+import { SchoolFinancials } from './SchoolFinancials';
 
-type TabType = 'stats' | 'schools' | 'students' | 'transactions' | 'vouchers';
+type TabType = 'stats' | 'schools' | 'students' | 'transactions' | 'vouchers' | 'financial';
 
 export function SuperAdminDashboard() {
   const { user, logout } = useAuthStore();
@@ -45,17 +46,17 @@ export function SuperAdminDashboard() {
               { id: 'stats', label: 'Visão Geral' },
               { id: 'schools', label: 'Escolas' },
               { id: 'students', label: 'Alunos' },
+              { id: 'financial', label: 'Financeiro' },
               { id: 'transactions', label: 'Transações' },
               { id: 'vouchers', label: 'Vouchers' },
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as TabType)}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-orange-500 text-orange-600'
-                    : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
-                }`}
+                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id
+                  ? 'border-orange-500 text-orange-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
+                  }`}
               >
                 {tab.label}
               </button>
@@ -69,6 +70,7 @@ export function SuperAdminDashboard() {
         {activeTab === 'stats' && <PlatformStats />}
         {activeTab === 'schools' && <SchoolList />}
         {activeTab === 'students' && <StudentList />}
+        {activeTab === 'financial' && <SchoolFinancials />}
         {activeTab === 'transactions' && <TransactionLedger />}
         {activeTab === 'vouchers' && <VoucherManager />}
       </main>

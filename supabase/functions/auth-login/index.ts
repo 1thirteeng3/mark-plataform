@@ -65,6 +65,7 @@ Deno.serve(async (req) => {
 
         // Create JWT token payload
         const payload = {
+            iss: 'mark-platform',
             userId: user.id,
             email: user.email,
             role: user.role,
@@ -73,10 +74,17 @@ Deno.serve(async (req) => {
             exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
         };
 
-        // Create JWT token (simple Base64 encoding for demo)
-        // In production, use proper JWT signing with crypto
-        const tokenData = btoa(JSON.stringify(payload));
-        const token = `Bearer.${tokenData}`;
+        // Create REAL JWT token (HMAC-SHA256)
+        const header = { alg: 'HS256', typ: 'JWT' };
+        const encoder = new TextEncoder();
+
+        const headerB64 = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+        const payloadB64 = btoa(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+        const jwtSecret = Deno.env.get('JWT_SECRET_V1') || 'mark-platform-secret-key-2024';
+        const signatureB64 = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecret);
+
+        const token = `${headerB64}.${payloadB64}.${signatureB64}`;
 
         return new Response(JSON.stringify({
             token,
@@ -107,3 +115,17 @@ Deno.serve(async (req) => {
         });
     }
 });
+
+// Helper for JWT Signing
+async function createHmacSignature(data: string, secret: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const dataBuffer = encoder.encode(data);
+    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signature = await crypto.subtle.sign('HMAC', key, dataBuffer);
+    // Convert to URL-safe Base64
+    return btoa(String.fromCharCode(...new Uint8Array(signature)))
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+}
