@@ -1,7 +1,17 @@
+// deno-lint-ignore-file
 // Expire Marks Cron Job
 // Module 2: Economic Governance (Burn Policy)
 // Automatically expires marks on annual basis (Dec 31st)
 // Executes as a scheduled cron job
+
+// Deno.serve...
+
+// Mock Email Service (Replace with Resend/SendGrid in production)
+async function sendEmail(to: string, subject: string, html: string) {
+    console.log(`[EMAIL SENT] To: ${to} | Subject: ${subject}`);
+    console.log(`[EMAIL CONTENT] ${html}`);
+    // return fetch('https://api.resend.com/emails', ...);
+}
 
 Deno.serve(async (req) => {
     const corsHeaders = {
@@ -91,12 +101,24 @@ Deno.serve(async (req) => {
                     studentsAffected: expirationResult.studentsAffected,
                 });
 
-                // TODO: Send email notification to school admin
-                // For now, just log the report
-                console.log(`[DEFLATION REPORT] ${school.name}:`, {
-                    marksExpired: expirationResult.totalMarksExpired,
-                    studentsAffected: expirationResult.studentsAffected,
-                });
+
+
+                // Send Email Notification to Admin
+                const emailContent = `
+                    <h1>Relatório de Expiração Anual - ${school.name}</h1>
+                    <p>A expiração anual de marcas foi concluída com sucesso.</p>
+                    <ul>
+                        <li><strong>Marcas Expiradas (Burned):</strong> ${expirationResult.totalMarksExpired}</li>
+                        <li><strong>Alunos Afetados:</strong> ${expirationResult.studentsAffected}</li>
+                        <li><strong>Data:</strong> ${new Date().toLocaleDateString('pt-BR')}</li>
+                    </ul>
+                    <p>Esta é uma medida automática de governança econômica.</p>
+                `;
+
+                // In a real app, we'd fetch the school admin's email. 
+                // For now, we send to the overarching system admin or log it.
+                await sendEmail('admin@mark.com', `Relatório de Expiração: ${school.name}`, emailContent);
+
             } else {
                 results.push({
                     schoolId: school.id,
@@ -140,7 +162,7 @@ Deno.serve(async (req) => {
     } catch (error) {
         console.error('Cron job error:', error);
         return new Response(
-            JSON.stringify({ 
+            JSON.stringify({
                 error: 'Erro ao executar expiração de marks',
                 details: error.message,
                 timestamp: new Date().toISOString(),

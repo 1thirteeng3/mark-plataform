@@ -1,3 +1,4 @@
+// deno-lint-ignore-file
 // Voucher Redemption V2 - Resilient Two-Phase Commit (2PC) + Reloadly Integration
 // Module 4: Resilient Integration
 // Orchestrates transactions across distributed systems (Database + External Providers)

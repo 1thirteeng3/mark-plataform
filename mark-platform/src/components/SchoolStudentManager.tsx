@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, X, User as UserIcon } from 'lucide-react';
+import { Plus, Search, Edit2, X, User as UserIcon, Upload, CheckCircle, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { apiClient } from '../lib/api';
 
@@ -9,6 +9,9 @@ interface StudentForm {
     name: string;
     email: string;
     password?: string;
+    grade?: string;
+    guardianEmail?: string;
+    enrollmentId?: string;
 }
 
 export function SchoolStudentManager() {
@@ -16,6 +19,9 @@ export function SchoolStudentManager() {
     const queryClient = useQueryClient();
     const [page, setPage] = useState(1);
     const [showModal, setShowModal] = useState(false);
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importJson, setImportJson] = useState('');
+    const [importResult, setImportResult] = useState<any>(null);
     const [editingStudent, setEditingStudent] = useState<StudentForm | null>(null);
     const [formData, setFormData] = useState<StudentForm>({ name: '', email: '' });
     const [error, setError] = useState('');
@@ -50,6 +56,16 @@ export function SchoolStudentManager() {
         onError: (err: any) => setError(err.message),
     });
 
+    const importMutation = useMutation({
+        mutationFn: (students: any[]) => apiClient.batchImportStudents(token!, students),
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({ queryKey: ['school-students'] });
+            setImportResult(data);
+            // Don't close immediately so they can see the result summary
+        },
+        onError: (err: any) => setError(err.message),
+    });
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
@@ -66,8 +82,22 @@ export function SchoolStudentManager() {
     };
 
     const handleEdit = (student: any) => {
-        setEditingStudent({ id: student.id, name: student.name, email: student.email });
-        setFormData({ name: student.name, email: student.email, password: '' });
+        setEditingStudent({
+            id: student.id,
+            name: student.name,
+            email: student.email,
+            grade: student.grade,
+            guardianEmail: student.guardian_email,
+            enrollmentId: student.enrollment_id
+        });
+        setFormData({
+            name: student.name,
+            email: student.email,
+            password: '',
+            grade: student.grade || '',
+            guardianEmail: student.guardian_email || '',
+            enrollmentId: student.enrollment_id || ''
+        });
         setShowModal(true);
     };
 
@@ -78,7 +108,9 @@ export function SchoolStudentManager() {
     };
 
     const resetForm = () => {
-        setFormData({ name: '', email: '', password: '' });
+        setFormData({ name: '', email: '', password: '', grade: '', guardianEmail: '', enrollmentId: '' });
+        setImportJson('');
+        setImportResult(null);
         setError('');
     };
 
@@ -91,13 +123,22 @@ export function SchoolStudentManager() {
                     <h2 className="text-2xl font-bold text-gray-800">Gerenciar Alunos</h2>
                     <p className="text-gray-600">Adicione e edite os alunos da sua escola</p>
                 </div>
-                <button
-                    onClick={handleAddNew}
-                    className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition shadow-sm"
-                >
-                    <Plus className="w-5 h-5" />
-                    <span>Novo Aluno</span>
-                </button>
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => { resetForm(); setShowImportModal(true); }}
+                        className="flex items-center gap-2 px-4 py-2 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-50 transition shadow-sm"
+                    >
+                        <Upload className="w-5 h-5" />
+                        <span>Importar Lote</span>
+                    </button>
+                    <button
+                        onClick={handleAddNew}
+                        className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition shadow-sm"
+                    >
+                        <Plus className="w-5 h-5" />
+                        <span>Novo Aluno</span>
+                    </button>
+                </div>
             </div>
 
             {isLoading ? (
@@ -108,6 +149,8 @@ export function SchoolStudentManager() {
                         <thead className="bg-orange-50">
                             <tr>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aluno</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Matrícula</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Turma</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Saldo</th>
                                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
@@ -123,6 +166,12 @@ export function SchoolStudentManager() {
                                             </div>
                                             <div className="text-sm font-medium text-gray-900">{student.name}</div>
                                         </div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{student.enrollment_id || '-'}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        <span className="px-2 py-1 bg-gray-100 rounded text-xs font-medium text-gray-600">
+                                            {student.grade || 'S/ Turma'}
+                                        </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{student.email}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-orange-600">{student.marksBalance}</td>
@@ -213,6 +262,40 @@ export function SchoolStudentManager() {
                                 />
                             </div>
 
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Matrícula (ID)</label>
+                                    <input
+                                        type="text"
+                                        value={formData.enrollmentId}
+                                        onChange={(e) => setFormData({ ...formData, enrollmentId: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                        placeholder="Ex: 2024001"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Turma</label>
+                                    <input
+                                        type="text"
+                                        value={formData.grade}
+                                        onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                        placeholder="Ex: 9º Ano A"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Email do Responsável</label>
+                                <input
+                                    type="email"
+                                    value={formData.guardianEmail}
+                                    onChange={(e) => setFormData({ ...formData, guardianEmail: e.target.value })}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                    placeholder="responsavel@email.com"
+                                />
+                            </div>
+
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     {editingStudent ? 'Nova Senha (Opcional)' : 'Senha'}
@@ -246,6 +329,116 @@ export function SchoolStudentManager() {
                     </div>
                 </div>
             )}
+
+            {/* Import Modal */}
+            {showImportModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-gray-900">Importação em Lote</h3>
+                            <button onClick={() => setShowImportModal(false)} className="text-gray-400 hover:text-gray-600">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {!importResult ? (
+                            <div className="space-y-4">
+                                <div className="bg-blue-50 p-4 rounded-lg flex gap-3 text-blue-700 text-sm">
+                                    <div className="mt-0.5"><AlertTriangle className="w-4 h-4" /></div>
+                                    <div>
+                                        <p className="font-semibold mb-1">Formato JSON esperado:</p>
+                                        <pre className="text-xs bg-blue-100 p-2 rounded overflow-x-auto">
+                                            {`[
+  {
+    "name": "Nome do Aluno",
+    "email": "email@aluno.com",
+    "grade": "9A",
+    "guardianEmail": "pais@email.com",
+    "enrollmentId": "MAT123"
+  }
+]`}
+                                        </pre>
+                                    </div>
+                                </div>
+
+                                {error && (
+                                    <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm border border-red-200">
+                                        {error}
+                                    </div>
+                                )}
+
+                                <textarea
+                                    value={importJson}
+                                    onChange={(e) => setImportJson(e.target.value)}
+                                    className="w-full h-64 p-3 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-orange-500"
+                                    placeholder="Cole seu JSON aqui..."
+                                />
+
+                                <div className="flex justify-end gap-3">
+                                    <button
+                                        onClick={() => setShowImportModal(false)}
+                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            try {
+                                                const data = JSON.parse(importJson);
+                                                importMutation.mutate(data);
+                                            } catch (e) {
+                                                setError("JSON inválido. Verifique a formatação.");
+                                            }
+                                        }}
+                                        disabled={importMutation.isPending || !importJson}
+                                        className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {importMutation.isPending ? 'Processando...' : 'Importar Alunos'}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-6 text-center py-8">
+                                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-600">
+                                    <CheckCircle className="w-8 h-8" />
+                                </div>
+                                <div>
+                                    <h4 className="text-xl font-bold text-gray-900">Importação Concluída!</h4>
+                                    <p className="text-gray-600 mt-2">
+                                        {importResult.message}
+                                    </p>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-lg text-left text-sm max-h-60 overflow-y-auto">
+                                    <h5 className="font-semibold mb-2">Relatório:</h5>
+                                    <ul className="space-y-1">
+                                        <li>Total: {importResult.summary.total}</li>
+                                        <li className="text-green-600">Importados: {importResult.summary.imported}</li>
+                                        <li className="text-yellow-600">Ignorados: {importResult.summary.skipped}</li>
+                                        <li className="text-red-600">Erros: {importResult.summary.errors}</li>
+                                    </ul>
+                                    {importResult.errors.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t">
+                                            <p className="font-semibold text-red-600 mb-1">Detalhes dos Erros:</p>
+                                            {importResult.errors.map((e: any, i: number) => (
+                                                <div key={i} className="text-xs text-red-500">
+                                                    Linha {e.line}: {e.error}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => { resetForm(); setShowImportModal(false); }}
+                                    className="px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800"
+                                >
+                                    Fechar
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }

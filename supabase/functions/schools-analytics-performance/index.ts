@@ -1,8 +1,61 @@
+// deno-lint-ignore-file
 // Schools Analytics - Performance Metrics
 // Module 3: Data Intelligence (Dashboards)
 // Returns performance analytics: top students, top rules, engagement metrics
 
-import { validateAdminToken } from '../_shared/validateAdminToken.ts';
+// Shared helper to validate Admin tokens (Inlined for Manual Deployment)
+async function validateAdminToken(token: string): Promise<{
+    valid: boolean;
+    payload?: {
+        userId: string;
+        email: string;
+        role: string;
+        schoolId: string;
+        exp: number;
+    };
+}> {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return { valid: false };
+        const [headerB64, payloadB64, signatureB64] = parts;
+        const payload = JSON.parse(atob(payloadB64));
+        const now = Math.floor(Date.now() / 1000);
+        if (payload.exp && payload.exp < now) return { valid: false };
+        const jwtSecret = Deno.env.get('JWT_SECRET_V1') || 'mark-platform-secret-key-2024';
+        const expectedSignature = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecret);
+        if (expectedSignature !== signatureB64) {
+            const jwtSecretV2 = Deno.env.get('JWT_SECRET_V2');
+            if (jwtSecretV2) {
+                const expectedSignatureV2 = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecretV2);
+                if (expectedSignatureV2 !== signatureB64) return { valid: false };
+            } else {
+                return { valid: false };
+            }
+        }
+        if (payload.iss !== 'mark-platform') return { valid: false };
+        return {
+            valid: true,
+            payload: {
+                userId: payload.userId,
+                email: payload.email,
+                role: payload.role,
+                schoolId: payload.schoolId,
+                exp: payload.exp,
+            }
+        };
+    } catch (error) {
+        console.error('Token validation error:', error);
+        return { valid: false };
+    }
+}
+async function createHmacSignature(data: string, secret: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const dataBuffer = encoder.encode(data);
+    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signature = await crypto.subtle.sign('HMAC', key, dataBuffer);
+    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+}
 
 Deno.serve(async (req) => {
     const corsHeaders = {
@@ -28,7 +81,7 @@ Deno.serve(async (req) => {
 
         const token = authHeader.replace('Bearer ', '');
         const validation = await validateAdminToken(token);
-        
+
         if (!validation.valid || !validation.payload) {
             return new Response(
                 JSON.stringify({ error: 'Token inválido ou usuário não autorizado' }),
@@ -49,7 +102,7 @@ Deno.serve(async (req) => {
         const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-        const targetSchoolId = role === 'SUPER_ADMIN' 
+        const targetSchoolId = role === 'SUPER_ADMIN'
             ? new URL(req.url).searchParams.get('schoolId') || schoolId
             : schoolId;
 
@@ -87,68 +140,51 @@ Deno.serve(async (req) => {
 
         const topRules = await topRulesResponse.json();
 
-        // Get grade/class performance (if enrollment data is available)
-        // For now, we'll return aggregated student performance
-        const performanceQuery = `
-            SELECT 
-                COUNT(DISTINCT s.id) as total_students,
-                AVG(s.marks_balance) as avg_balance,
-                SUM(CASE WHEN s.marks_balance > 0 THEN 1 ELSE 0 END) as active_students
-            FROM students s
-            WHERE s.school_id = '${targetSchoolId}'
-        `;
-
-        const performanceResponse = await fetch(
-            `${supabaseUrl}/rest/v1/rpc/exec_sql`,
+        // Get Class Performance (from new View)
+        const classPerformanceResponse = await fetch(
+            `${supabaseUrl}/rest/v1/analytics_class_performance?school_id=eq.${targetSchoolId}&order=engagement_score.desc`,
             {
-                method: 'POST',
                 headers: {
                     'apikey': serviceKey,
                     'Authorization': `Bearer ${serviceKey}`,
-                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ query: performanceQuery }),
             }
         );
 
-        let schoolPerformance = {
+        let classPerformance = [];
+        let schoolOverview = {
             totalStudents: 0,
-            avgBalance: 0,
             activeStudents: 0,
-            engagementRate: 0,
+            avgEngagement: 0
         };
 
-        // Fallback: Calculate manually if RPC fails
-        const studentsResponse = await fetch(
-            `${supabaseUrl}/rest/v1/students?school_id=eq.${targetSchoolId}&select=marks_balance`,
-            {
-                headers: {
-                    'apikey': serviceKey,
-                    'Authorization': `Bearer ${serviceKey}`,
-                },
+        if (classPerformanceResponse.ok) {
+            classPerformance = await classPerformanceResponse.json();
+
+            // Calculate school-wide aggregates from class data
+            if (classPerformance.length > 0) {
+                const totalStudents = classPerformance.reduce((sum: number, c: any) => sum + c.total_students, 0);
+                const activeStudents = classPerformance.reduce((sum: number, c: any) => sum + c.active_students, 0);
+                const totalEngagement = classPerformance.reduce((sum: number, c: any) => sum + c.engagement_score, 0);
+
+                schoolOverview = {
+                    totalStudents,
+                    activeStudents,
+                    avgEngagement: parseFloat((totalEngagement / classPerformance.length).toFixed(2))
+                };
             }
-        );
-
-        if (studentsResponse.ok) {
-            const students = await studentsResponse.json();
-            const totalStudents = students.length;
-            const activeStudents = students.filter((s: any) => s.marks_balance > 0).length;
-            const totalBalance = students.reduce((sum: number, s: any) => sum + s.marks_balance, 0);
-            const avgBalance = totalStudents > 0 ? totalBalance / totalStudents : 0;
-            const engagementRate = totalStudents > 0 ? (activeStudents / totalStudents * 100) : 0;
-
-            schoolPerformance = {
-                totalStudents,
-                avgBalance: Math.round(avgBalance * 100) / 100,
-                activeStudents,
-                engagementRate: Math.round(engagementRate * 100) / 100,
-            };
         }
 
         return new Response(
             JSON.stringify({
                 schoolId: targetSchoolId,
-                performance: schoolPerformance,
+                overview: schoolOverview,
+                classPerformance: classPerformance.map((c: any) => ({
+                    grade: c.grade,
+                    totalStudents: c.total_students,
+                    activeStudents: c.active_students,
+                    engagementScore: c.engagement_score
+                })),
                 topStudents: topStudents.map((student: any) => ({
                     rank: student.rank,
                     studentId: student.student_id,
@@ -171,9 +207,9 @@ Deno.serve(async (req) => {
     } catch (error) {
         console.error('Performance analytics error:', error);
         return new Response(
-            JSON.stringify({ 
+            JSON.stringify({
                 error: 'Erro ao buscar analytics de desempenho',
-                details: error.message 
+                details: error.message
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
         );

@@ -140,6 +140,20 @@ class ApiClient {
     });
   }
 
+  async getSchoolPerformance(token: string): Promise<any> {
+    return this.callFunction('schools-analytics-performance', {
+      method: 'GET',
+      userToken: token,
+    });
+  }
+
+  async batchImportStudents(token: string, students: any[]): Promise<any> {
+    return this.callFunction('students-batch-import', {
+      body: { students },
+      userToken: token,
+    });
+  }
+
   // SUPER_ADMIN Platform API endpoints
   async getPlatformStats(token: string): Promise<import('../types').PlatformStats> {
     return this.callFunction('platform-stats', {
