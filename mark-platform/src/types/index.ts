@@ -120,6 +120,8 @@ export interface PlatformStudent {
   email: string;
   schoolName: string;
   marksBalance: number;
+  enrollment_id?: string;
+  grade?: string;
 }
 
 export interface PlatformTransaction {

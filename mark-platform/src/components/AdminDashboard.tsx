@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { LogOut, Award, Settings } from 'lucide-react';
+import { LogOut, Award, Settings, User as UserIcon, TrendingUp } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { RulesManager } from './RulesManager';
 import { AwardMarks } from './AwardMarks';
+import { SchoolStudentManager } from './SchoolStudentManager';
+import { SchoolFinancials } from './SchoolFinancials';
 
 export function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'rules' | 'awards'>('rules');
+  const [activeTab, setActiveTab] = useState<'rules' | 'awards' | 'students' | 'financials'>('rules');
   const { user, logout } = useAuthStore();
 
   return (
@@ -61,8 +63,8 @@ export function AdminDashboard() {
               <button
                 onClick={() => setActiveTab('financials')}
                 className={`flex items-center gap-2 px-6 py-4 border-b-2 font-medium transition ${activeTab === 'financials'
-                    ? 'border-orange-500 text-orange-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-orange-500 text-orange-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
                 <TrendingUp className="w-5 h-5" />
@@ -71,8 +73,8 @@ export function AdminDashboard() {
               <button
                 onClick={() => setActiveTab('awards')}
                 className={`flex items-center gap-2 px-6 py-4 border-b-2 font-medium transition ${activeTab === 'awards'
-                    ? 'border-orange-500 text-orange-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-orange-500 text-orange-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
                 <Award className="w-5 h-5" />
