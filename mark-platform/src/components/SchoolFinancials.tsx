@@ -93,95 +93,95 @@ export function SchoolFinancials() {
                 <h3 className="text-2xl font-bold text-gray-900">{metrics?.totalRedeemed || 0}</h3>
                 <p className="text-xs text-gray-400 mt-1">Marcas trocadas por prêmios</p>
             </div>
-        </div>
 
-            {/* Timeline Table */ }
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-800">Histórico de Atividade (30 Dias)</h3>
-        </div>
-        <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                    <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Alunos Ativos</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-green-600 uppercase tracking-wider">Emitidas</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-red-600 uppercase tracking-wider">Resgatadas</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Liquidez</th>
-                    </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                    {timeline?.map((day: any, index: number) => (
-                        <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {new Date(day.date).toLocaleDateString('pt-BR')}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-600">
-                                {day.activeStudents}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-green-600">
-                                +{day.minted}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-red-600">
-                                -{day.redeemed}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
-                                {day.minted - day.redeemed}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {/* Class Performance Table */ }
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-800">Ranking de Engajamento por Turma</h3>
-        </div>
-        <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                    <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Turma</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Alunos</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Com Saldo Ativo</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-purple-600 uppercase tracking-wider">Score</th>
-                    </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                    {classPerformance?.map((c: any, index: number) => (
-                        <tr key={c.grade} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-bold">
-                                {index + 1}º
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {c.grade}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-600">
-                                {c.totalStudents}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-600">
-                                {c.activeStudents}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-purple-600">
-                                {c.engagementScore.toFixed(1)}%
-                            </td>
-                        </tr>
-                    ))}
-                    {(!classPerformance || classPerformance.length === 0) && (
-                        <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                                Nenhum dado de turma disponível. Adicione a "Turma" aos seus alunos para ver o ranking.
-                            </td>
-                        </tr>
-                    )}
-                </tbody>
-            </table>
-        </div>
-    </div>
+
+            {/* Timeline Table */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-800">Histórico de Atividade (30 Dias)</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Alunos Ativos</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-green-600 uppercase tracking-wider">Emitidas</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-red-600 uppercase tracking-wider">Resgatadas</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Liquidez</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {timeline?.map((day: any, index: number) => (
+                                <tr key={index} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                        {new Date(day.date).toLocaleDateString('pt-BR')}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-600">
+                                        {day.activeStudents}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-green-600">
+                                        +{day.minted}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-red-600">
+                                        -{day.redeemed}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">
+                                        {day.minted - day.redeemed}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {/* Class Performance Table */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-800">Ranking de Engajamento por Turma</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Turma</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Alunos</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Com Saldo Ativo</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-purple-600 uppercase tracking-wider">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {classPerformance?.map((c: any, index: number) => (
+                                <tr key={c.grade} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-bold">
+                                        {index + 1}º
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        {c.grade}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-600">
+                                        {c.totalStudents}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-600">
+                                        {c.activeStudents}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-purple-600">
+                                        {c.engagementScore.toFixed(1)}%
+                                    </td>
+                                </tr>
+                            ))}
+                            {(!classPerformance || classPerformance.length === 0) && (
+                                <tr>
+                                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                                        Nenhum dado de turma disponível. Adicione a "Turma" aos seus alunos para ver o ranking.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div >
     );
 }
