@@ -74,8 +74,9 @@ Deno.serve(async (req) => {
     }
 
     try {
+        // Validate admin token
         const authHeader = req.headers.get('x-user-token') || req.headers.get('authorization');
-        if (!authHeader) throw new Error('No authentication token provided');
+        if (!authHeader) { throw new Error('No authentication token provided'); }
 
         const token = authHeader.replace('Bearer ', '');
         const validation = await validateAdminToken(token);
