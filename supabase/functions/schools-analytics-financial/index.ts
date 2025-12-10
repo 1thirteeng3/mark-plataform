@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
 
         const token = authHeader.replace('Bearer ', '');
         const validation = await validateAdminToken(token);
-        
+
         if (!validation.valid || !validation.payload) {
             return new Response(
                 JSON.stringify({ error: 'Token inválido ou usuário não autorizado' }),
@@ -49,9 +49,35 @@ Deno.serve(async (req) => {
         const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-        const targetSchoolId = role === 'SUPER_ADMIN' 
+        let targetSchoolId = role === 'SUPER_ADMIN'
             ? new URL(req.url).searchParams.get('schoolId') || schoolId
             : schoolId;
+
+        // Fallback for Super Admin: If no specific school selected/assigned, grab the first one (Demo Mode)
+        if (!targetSchoolId && role === 'SUPER_ADMIN') {
+            const firstSchoolResponse = await fetch(
+                `${supabaseUrl}/rest/v1/schools?select=id&limit=1`,
+                {
+                    headers: {
+                        'apikey': serviceKey,
+                        'Authorization': `Bearer ${serviceKey}`,
+                    },
+                }
+            );
+            if (firstSchoolResponse.ok) {
+                const schools = await firstSchoolResponse.json();
+                if (schools.length > 0) {
+                    targetSchoolId = schools[0].id;
+                }
+            }
+        }
+
+        if (!targetSchoolId) {
+            return new Response(
+                JSON.stringify({ error: 'Nenhuma escola encontrada para exibir dados.' }),
+                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+            );
+        }
 
         // Get financial summary from view
         const summaryResponse = await fetch(
@@ -97,7 +123,7 @@ Deno.serve(async (req) => {
         const totalRedeemed = analytics.reduce((sum: number, day: any) => sum + (day.total_redeemed || 0), 0);
         const totalExpired = analytics.reduce((sum: number, day: any) => sum + (day.total_expired || 0), 0);
 
-        const burnRate = totalMinted > 0 
+        const burnRate = totalMinted > 0
             ? ((totalRedeemed + totalExpired) / totalMinted * 100).toFixed(2)
             : '0.00';
 
@@ -141,9 +167,9 @@ Deno.serve(async (req) => {
     } catch (error) {
         console.error('Financial analytics error:', error);
         return new Response(
-            JSON.stringify({ 
+            JSON.stringify({
                 error: 'Erro ao buscar analytics financeiro',
-                details: error.message 
+                details: error.message
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
         );
