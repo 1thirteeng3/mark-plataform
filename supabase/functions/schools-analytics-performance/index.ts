@@ -102,9 +102,35 @@ Deno.serve(async (req) => {
         const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-        const targetSchoolId = role === 'SUPER_ADMIN'
+        let targetSchoolId = role === 'SUPER_ADMIN'
             ? new URL(req.url).searchParams.get('schoolId') || schoolId
             : schoolId;
+
+        // Fallback for Super Admin: If no specific school selected/assigned, grab the first one (Demo Mode)
+        if (!targetSchoolId && role === 'SUPER_ADMIN') {
+            const firstSchoolResponse = await fetch(
+                `${supabaseUrl}/rest/v1/schools?select=id&limit=1`,
+                {
+                    headers: {
+                        'apikey': serviceKey,
+                        'Authorization': `Bearer ${serviceKey}`,
+                    },
+                }
+            );
+            if (firstSchoolResponse.ok) {
+                const schools = await firstSchoolResponse.json();
+                if (schools.length > 0) {
+                    targetSchoolId = schools[0].id;
+                }
+            }
+        }
+
+        if (!targetSchoolId) {
+            return new Response(
+                JSON.stringify({ error: 'Nenhuma escola encontrada para exibir dados.' }),
+                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+            );
+        }
 
         // Get top students (limit 10)
         const topStudentsResponse = await fetch(
