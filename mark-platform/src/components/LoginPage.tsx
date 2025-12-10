@@ -86,14 +86,7 @@ export function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <p className="text-sm text-gray-600 text-center mb-2">Credenciais de Demonstração:</p>
-            <div className="space-y-1 text-xs text-gray-500">
-              <p className="text-center">Super Admin: super@mark.com / superadmin123</p>
-              <p className="text-center">Administrador: admin@springfield.edu / password123</p>
-              <p className="text-center">Estudante: john@springfield.edu / password123</p>
-            </div>
-          </div>
+
         </div>
       </div>
     </div>
