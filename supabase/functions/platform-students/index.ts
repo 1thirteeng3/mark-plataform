@@ -54,7 +54,10 @@ async function createHmacSignature(data: string, secret: string): Promise<string
     const dataBuffer = encoder.encode(data);
     const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const signature = await crypto.subtle.sign('HMAC', key, dataBuffer);
-    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+    return btoa(String.fromCharCode(...new Uint8Array(signature)))
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
 }
 
 Deno.serve(async (req) => {
