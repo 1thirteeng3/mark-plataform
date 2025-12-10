@@ -64,7 +64,7 @@ async function createHmacSignature(data: string, secret: string): Promise<string
 Deno.serve(async (req) => {
     const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
         'Access-Control-Max-Age': '86400',
     };
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
 
     try {
         // Validate admin token
-        const authHeader = req.headers.get('x-user-token') || req.headers.get('authorization');
+        const authHeader = req.headers.get('authorization');
         if (!authHeader) {
             return new Response(
                 JSON.stringify({ error: 'Token de autenticação ausente' }),

@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
     }
 
     try {
-        // Validate admin token
+        // Validate SUPER_ADMIN token
         const authHeader = req.headers.get('x-user-token') || req.headers.get('authorization');
         if (!authHeader) throw new Error('No authentication token provided');
 
