@@ -72,17 +72,16 @@ export function VoucherCatalog() {
       <div>
         <h2 className="text-xl font-semibold text-gray-800">Vouchers Disponíveis</h2>
         <p className="text-sm text-gray-600 mt-1">
-          Resgate suas marcações por recompensas incríveis
+          Resgate seus Marks por recompensas incríveis
         </p>
       </div>
 
       {redemptionResult && (
         <div
-          className={`rounded-lg p-4 flex items-start gap-3 ${
-            redemptionResult.success
+          className={`rounded-lg p-4 flex items-start gap-3 ${redemptionResult.success
               ? 'bg-green-50 border border-green-200'
               : 'bg-red-50 border border-red-200'
-          }`}
+            }`}
         >
           <div className="flex-shrink-0">
             {redemptionResult.success ? (
@@ -93,9 +92,8 @@ export function VoucherCatalog() {
           </div>
           <div className="flex-1">
             <p
-              className={`font-medium ${
-                redemptionResult.success ? 'text-green-800' : 'text-red-800'
-              }`}
+              className={`font-medium ${redemptionResult.success ? 'text-green-800' : 'text-red-800'
+                }`}
             >
               {redemptionResult.message}
             </p>
@@ -131,22 +129,21 @@ export function VoucherCatalog() {
                   <div className="mt-4 flex items-center justify-between">
                     <div>
                       <p className="text-2xl font-bold text-orange-600">
-                        {voucher.marksCost} marcações
+                        {voucher.marksCost} Marks
                       </p>
                       {!canAfford && (
                         <p className="text-xs text-red-600 mt-1">
-                          Precisa de {voucher.marksCost - currentBalance} marcações a mais
+                          Precisa de {voucher.marksCost - currentBalance} Marks a mais
                         </p>
                       )}
                     </div>
                     <button
                       onClick={() => handleRedeem(voucher)}
                       disabled={!canAfford || redeemMutation.isPending}
-                      className={`px-4 py-2 rounded-lg font-medium transition ${
-                        canAfford
+                      className={`px-4 py-2 rounded-lg font-medium transition ${canAfford
                           ? 'bg-orange-600 text-white hover:bg-orange-700'
                           : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      }`}
+                        }`}
                     >
                       Resgatar
                     </button>
@@ -172,13 +169,13 @@ export function VoucherCatalog() {
               <div className="flex justify-between items-center mb-2">
                 <span className="text-gray-600">Custo:</span>
                 <span className="font-bold text-orange-600">
-                  {selectedVoucher.marksCost} marcações
+                  {selectedVoucher.marksCost} Marks
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Seu novo saldo:</span>
                 <span className="font-bold text-gray-800">
-                  {currentBalance - selectedVoucher.marksCost} marcações
+                  {currentBalance - selectedVoucher.marksCost} Marks
                 </span>
               </div>
             </div>

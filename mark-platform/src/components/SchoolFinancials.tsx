@@ -38,7 +38,7 @@ export function SchoolFinancials() {
         <div className="space-y-6">
             <div>
                 <h2 className="text-2xl font-bold text-gray-800">Saúde Financeira da Escola</h2>
-                <p className="text-gray-600">Visualização em tempo real da economia de marcas</p>
+                <p className="text-gray-600">Visualização em tempo real da economia de Marks</p>
             </div>
 
             {/* KPI Cards */}
@@ -52,13 +52,13 @@ export function SchoolFinancials() {
                             Ativo
                         </span>
                     </div>
-                    <p className="text-sm text-gray-500">Marcas em Circulação</p>
+                    <p className="text-sm text-gray-500">Marks em Circulação</p>
                     <h3 className="text-2xl font-bold text-gray-900">{financial?.circulatingMarks || 0}</h3>
                     <p className="text-xs text-gray-400 mt-1">Passivo total atual</p>
                 </div>
 
                 <h3 className="text-2xl font-bold text-gray-900">{metrics?.burnRate}%</h3>
-                <p className="text-xs text-gray-400 mt-1">% de marcas resgatadas vs criadas</p>
+                <p className="text-xs text-gray-400 mt-1">% de Marks resgatados vs criados</p>
             </div>
 
             <div className="bg-white p-6 rounded-xl border border-orange-100 shadow-sm">
@@ -80,7 +80,7 @@ export function SchoolFinancials() {
                 </div>
                 <p className="text-sm text-gray-500">Total Emitido (30d)</p>
                 <h3 className="text-2xl font-bold text-gray-900">{metrics?.totalMinted || 0}</h3>
-                <p className="text-xs text-gray-400 mt-1">Novas marcas geradas</p>
+                <p className="text-xs text-gray-400 mt-1">Novos Marks gerados</p>
             </div>
 
             <div className="bg-white p-6 rounded-xl border border-orange-100 shadow-sm">
@@ -91,7 +91,7 @@ export function SchoolFinancials() {
                 </div>
                 <p className="text-sm text-gray-500">Total Resgatado (30d)</p>
                 <h3 className="text-2xl font-bold text-gray-900">{metrics?.totalRedeemed || 0}</h3>
-                <p className="text-xs text-gray-400 mt-1">Marcas trocadas por prêmios</p>
+                <p className="text-xs text-gray-400 mt-1">Marks trocados por prêmios</p>
             </div>
 
 

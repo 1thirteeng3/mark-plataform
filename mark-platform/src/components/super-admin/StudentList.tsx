@@ -58,7 +58,7 @@ export function StudentList() {
                 Escola
               </th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Saldo de Marcações
+                Saldo de Marks
               </th>
             </tr>
           </thead>

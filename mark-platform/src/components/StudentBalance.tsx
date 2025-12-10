@@ -22,10 +22,10 @@ export function StudentBalance() {
       <div className="bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl p-8 text-white">
         <div className="flex items-center gap-3 mb-4">
           <Coins className="w-8 h-8" />
-          <h2 className="text-2xl font-bold">Seu Saldo de Marcações</h2>
+          <h2 className="text-2xl font-bold">Seu Saldo de Marks</h2>
         </div>
         <div className="text-5xl font-bold mb-2">{data?.balance || 0}</div>
-        <p className="text-orange-100">Total de marcações disponíveis</p>
+        <p className="text-orange-100">Total de Marks disponíveis</p>
       </div>
 
       <div>
@@ -43,11 +43,10 @@ export function StudentBalance() {
               >
                 <div className="flex items-center gap-4">
                   <div
-                    className={`p-2 rounded-full ${
-                      transaction.type === 'CREDIT'
+                    className={`p-2 rounded-full ${transaction.type === 'CREDIT'
                         ? 'bg-green-100 text-green-600'
                         : 'bg-red-100 text-red-600'
-                    }`}
+                      }`}
                   >
                     {transaction.type === 'CREDIT' ? (
                       <TrendingUp className="w-5 h-5" />
@@ -63,9 +62,8 @@ export function StudentBalance() {
                   </div>
                 </div>
                 <div
-                  className={`text-lg font-bold ${
-                    transaction.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'
-                  }`}
+                  className={`text-lg font-bold ${transaction.type === 'CREDIT' ? 'text-green-600' : 'text-red-600'
+                    }`}
                 >
                   {transaction.type === 'CREDIT' ? '+' : '-'}
                   {transaction.amount}

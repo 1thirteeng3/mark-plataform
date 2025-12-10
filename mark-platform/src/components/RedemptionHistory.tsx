@@ -55,15 +55,14 @@ export function RedemptionHistory() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-orange-600 font-bold">{redemption.marksCost} marcações</p>
+                      <p className="text-orange-600 font-bold">{redemption.marksCost} Marks</p>
                       <span
-                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ${
-                          redemption.status === 'COMPLETED'
+                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ${redemption.status === 'COMPLETED'
                             ? 'bg-green-100 text-green-800'
                             : redemption.status === 'PENDING'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
                       >
                         {redemption.status}
                       </span>

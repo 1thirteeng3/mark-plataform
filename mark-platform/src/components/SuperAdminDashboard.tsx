@@ -46,7 +46,7 @@ export function SuperAdminDashboard() {
               { id: 'stats', label: 'Visão Geral' },
               { id: 'schools', label: 'Escolas' },
               { id: 'students', label: 'Alunos' },
-              { id: 'financial', label: 'Financeiro' },
+              { id: 'financial', label: 'Dados' },
               { id: 'transactions', label: 'Transações' },
               { id: 'vouchers', label: 'Vouchers' },
             ].map((tab) => (

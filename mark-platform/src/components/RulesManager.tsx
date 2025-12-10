@@ -79,7 +79,7 @@ export function RulesManager() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Marcações a Premiar
+                Marks a Premiar
               </label>
               <input
                 type="number"
@@ -125,7 +125,7 @@ export function RulesManager() {
               <div className="flex-1">
                 <h3 className="font-semibold text-gray-800">{rule.ruleName}</h3>
                 <p className="text-2xl font-bold text-orange-600 mt-2">
-                  {rule.marksToAward} marcações
+                  {rule.marksToAward} Marks
                 </p>
               </div>
               {rule.isActive && (

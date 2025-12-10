@@ -68,7 +68,7 @@ export function AdminDashboard() {
                   }`}
               >
                 <TrendingUp className="w-5 h-5" />
-                <span>Financeiro</span>
+                <span>Dados</span>
               </button>
               <button
                 onClick={() => setActiveTab('awards')}

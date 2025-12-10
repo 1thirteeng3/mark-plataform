@@ -37,7 +37,7 @@ export function VoucherManager() {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    
+
     const voucherData: VoucherFormData = {
       name: formData.get('name') as string,
       description: formData.get('description') as string,
@@ -133,7 +133,7 @@ export function VoucherManager() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Custo em Marcações
+                  Custo em Marks
                 </label>
                 <input
                   type="number"
@@ -216,27 +216,25 @@ export function VoucherManager() {
           vouchers.map((voucher) => (
             <div
               key={voucher.id}
-              className={`bg-white rounded-xl shadow-md p-6 border-2 transition-all ${
-                voucher.isAvailable
+              className={`bg-white rounded-xl shadow-md p-6 border-2 transition-all ${voucher.isAvailable
                   ? 'border-orange-200 hover:border-orange-400'
                   : 'border-gray-200 opacity-60'
-              }`}
+                }`}
             >
               <div className="flex justify-between items-start mb-3">
                 <h3 className="text-lg font-semibold text-gray-900">{voucher.name}</h3>
                 <span
-                  className={`px-2 py-1 text-xs font-medium rounded-full ${
-                    voucher.isAvailable
+                  className={`px-2 py-1 text-xs font-medium rounded-full ${voucher.isAvailable
                       ? 'bg-green-100 text-green-700'
                       : 'bg-gray-100 text-gray-600'
-                  }`}
+                    }`}
                 >
                   {voucher.isAvailable ? 'Disponível' : 'Indisponível'}
                 </span>
               </div>
               <p className="text-gray-600 text-sm mb-4">{voucher.description}</p>
               <div className="flex justify-between items-center mb-4">
-                <span className="text-2xl font-bold text-orange-600">{voucher.marksCost} Marcações</span>
+                <span className="text-2xl font-bold text-orange-600">{voucher.marksCost} Marks</span>
               </div>
               <div className="text-xs text-gray-500 mb-4 font-mono">
                 ID: {voucher.providerProductId}

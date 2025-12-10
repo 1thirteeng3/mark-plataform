@@ -47,7 +47,7 @@ export function PlatformStats() {
       icon: '📊',
     },
     {
-      label: 'Total de Marcações em Circulação',
+      label: 'Total de Marks em Circulação',
       value: stats?.totalMarksInCirculation || 0,
       bgColor: 'bg-gradient-to-br from-red-500 to-red-600',
       icon: '⭐',
@@ -88,7 +88,7 @@ export function PlatformStats() {
             <span className="text-green-600 font-semibold">Operacional</span>
           </div>
           <div className="flex justify-between items-center p-3 bg-orange-50 rounded-lg">
-            <span className="text-gray-700">Média de Marcações por Aluno</span>
+            <span className="text-gray-700">Média de Marks por Aluno</span>
             <span className="text-orange-600 font-semibold">
               {stats?.totalStudents ? Math.round((stats.totalMarksInCirculation / stats.totalStudents) * 10) / 10 : 0}
             </span>
