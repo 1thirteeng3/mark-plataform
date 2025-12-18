@@ -42,17 +42,15 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 18
-          cache: 'npm'
-          cache-dependency-path: mark-platform/package-lock.json
+
+      - name: Install pnpm
+        run: npm install -g pnpm
 
       - name: Install Dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: npm run lint
-
-      # - name: Type Check (Optional if tsconfig is strict)
-      #   run: npx tsc --noEmit
+        run: pnpm run lint
 
       - name: Build Verification
-        run: npm run build
+        run: pnpm run build
