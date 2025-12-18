@@ -27,6 +27,7 @@ export interface SchoolRule {
   marksToAward: number;
   isActive: boolean;
   createdAt: string;
+  targetGrade?: string; // Optional: Specific grade/class this rule applies to
 }
 
 export interface CreateRuleRequest {
