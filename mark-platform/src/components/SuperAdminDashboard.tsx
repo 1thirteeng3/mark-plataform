@@ -5,7 +5,6 @@ import { SchoolList } from './super-admin/SchoolList';
 import { StudentList } from './super-admin/StudentList';
 import { TransactionLedger } from './super-admin/TransactionLedger';
 import { VoucherManager } from './super-admin/VoucherManager';
-import { VoucherManager } from './super-admin/VoucherManager';
 import { SchoolFinancials } from './SchoolFinancials';
 import { UserRegistration } from './super-admin/UserRegistration';
 
