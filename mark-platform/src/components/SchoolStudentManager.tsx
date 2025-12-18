@@ -413,6 +413,10 @@ export function SchoolStudentManager() {
                                     <ul className="space-y-1">
                                         <li>Total: {importResult.summary.total}</li>
                                         <li className="text-green-600">Importados: {importResult.summary.imported}</li>
+                                        <li className="text-blue-600">
+                                            Automação: {importResult.summary.automation?.awards_triggered || 0} regras aplicadas
+                                            ({importResult.summary.automation?.total_marks || 0} Marks)
+                                        </li>
                                         <li className="text-yellow-600">Ignorados: {importResult.summary.skipped}</li>
                                         <li className="text-red-600">Erros: {importResult.summary.errors}</li>
                                     </ul>

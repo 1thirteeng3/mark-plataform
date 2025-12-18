@@ -75,7 +75,7 @@ class ApiClient {
     });
   }
 
-  async createSchoolRule(token: string, rule: CreateRuleRequest): Promise<SchoolRule> {
+  async createSchoolRule(token: string, rule: { ruleName: string; marksToAward: number; targetGrade?: string }): Promise<SchoolRule> {
     return this.callFunction('schools-rules-create', {
       body: rule,
       userToken: token,
@@ -210,6 +210,29 @@ class ApiClient {
       method: 'GET',
       userToken: token,
     });
+  }
+
+  // --- SUPER ADMIN USER MANAGEMENT ---
+  async adminCreateUser(token: string, userData: any): Promise<any> {
+    // This calls the wrapper function we created
+    // Pass the token in Authorization header as expected by the function
+    const response = await fetch(`${FUNCTIONS_URL}/admin-users-create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`, // Function expects direct bearer
+        'apikey': ANON_KEY,
+      },
+      body: JSON.stringify(userData),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+
+    return data;
   }
 }
 

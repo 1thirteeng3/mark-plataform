@@ -5,9 +5,11 @@ import { SchoolList } from './super-admin/SchoolList';
 import { StudentList } from './super-admin/StudentList';
 import { TransactionLedger } from './super-admin/TransactionLedger';
 import { VoucherManager } from './super-admin/VoucherManager';
+import { VoucherManager } from './super-admin/VoucherManager';
 import { SchoolFinancials } from './SchoolFinancials';
+import { UserRegistration } from './super-admin/UserRegistration';
 
-type TabType = 'stats' | 'schools' | 'students' | 'transactions' | 'vouchers' | 'financial';
+type TabType = 'stats' | 'schools' | 'students' | 'transactions' | 'vouchers' | 'financial' | 'users';
 
 export function SuperAdminDashboard() {
   const { user, logout } = useAuthStore();
@@ -49,6 +51,7 @@ export function SuperAdminDashboard() {
               { id: 'financial', label: 'Dados' },
               { id: 'transactions', label: 'Transações' },
               { id: 'vouchers', label: 'Vouchers' },
+              { id: 'users', label: 'Usuários' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -73,6 +76,7 @@ export function SuperAdminDashboard() {
         {activeTab === 'financial' && <SchoolFinancials />}
         {activeTab === 'transactions' && <TransactionLedger />}
         {activeTab === 'vouchers' && <VoucherManager />}
+        {activeTab === 'users' && <UserRegistration />}
       </main>
     </div>
   );

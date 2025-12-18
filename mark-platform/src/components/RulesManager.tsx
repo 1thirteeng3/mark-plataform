@@ -8,6 +8,7 @@ export function RulesManager() {
   const [showForm, setShowForm] = useState(false);
   const [ruleName, setRuleName] = useState('');
   const [marksToAward, setMarksToAward] = useState('');
+  const [targetGrade, setTargetGrade] = useState('');
   const { token } = useAuthStore();
   const queryClient = useQueryClient();
 
@@ -18,13 +19,14 @@ export function RulesManager() {
   });
 
   const createRuleMutation = useMutation({
-    mutationFn: (newRule: { ruleName: string; marksToAward: number }) =>
+    mutationFn: (newRule: { ruleName: string; marksToAward: number; targetGrade?: string }) =>
       apiClient.createSchoolRule(token!, newRule),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['school-rules'] });
       setShowForm(false);
       setRuleName('');
       setMarksToAward('');
+      setTargetGrade('');
     },
   });
 
@@ -32,7 +34,11 @@ export function RulesManager() {
     e.preventDefault();
     const marks = parseInt(marksToAward);
     if (marks > 0) {
-      createRuleMutation.mutate({ ruleName, marksToAward: marks });
+      createRuleMutation.mutate({
+        ruleName,
+        marksToAward: marks,
+        targetGrade: targetGrade || undefined
+      });
     }
   };
 
@@ -63,7 +69,7 @@ export function RulesManager() {
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-orange-50 rounded-lg p-4 border border-orange-200">
           <h3 className="text-lg font-medium text-gray-800 mb-4">Criar Nova Regra</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Nome da Regra
@@ -75,6 +81,18 @@ export function RulesManager() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 placeholder="ex: Frequência Perfeita"
                 required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Série/Turma Alvo (Opcional)
+              </label>
+              <input
+                type="text"
+                value={targetGrade}
+                onChange={(e) => setTargetGrade(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                placeholder="ex: 9A (Deixe vazio para todos)"
               />
             </div>
             <div>
@@ -106,6 +124,7 @@ export function RulesManager() {
                 setShowForm(false);
                 setRuleName('');
                 setMarksToAward('');
+                setTargetGrade('');
               }}
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
             >
@@ -123,15 +142,22 @@ export function RulesManager() {
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
-                <h3 className="font-semibold text-gray-800">{rule.ruleName}</h3>
+                <div className="flex justify-between items-start">
+                  <h3 className="font-semibold text-gray-800">{rule.ruleName}</h3>
+                  {rule.targetGrade && (
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full font-medium border border-blue-200">
+                      {rule.targetGrade}
+                    </span>
+                  )}
+                </div>
                 <p className="text-2xl font-bold text-orange-600 mt-2">
                   {rule.marksToAward} Marks
                 </p>
               </div>
               {rule.isActive && (
-                <div className="flex items-center gap-1 text-green-600 text-sm">
+                <div className="flex items-center gap-1 text-green-600 text-sm ml-2">
                   <Check className="w-4 h-4" />
-                  <span>Ativa</span>
+                  <span className="sr-only">Ativa</span>
                 </div>
               )}
             </div>
