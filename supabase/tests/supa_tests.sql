@@ -65,6 +65,19 @@ SELECT results_eq(
     'Redemption should be PENDING'
 );
 
+-- 6.-- Test 5: Verify 2PC Functions exist
+SELECT has_function('public', 'prepare_redemption', 'Function prepare_redemption should exist');
+SELECT has_function('public', 'confirm_redemption', 'Function confirm_redemption should exist');
+SELECT has_function('public', 'rollback_redemption', 'Function rollback_redemption should exist');
+
+-- Test 6: Verify Expiration Function and Cron
+SELECT has_function('public', 'expire_school_balances', 'Function expire_school_balances should exist');
+SELECT has_function('public', 'trigger_annual_expiration', 'Function trigger_annual_expiration should exist');
+-- Note: Cannot easily test pg_cron execution in pgTAP without running it, but we check the wrapper.
+
+-- Test 7: Verify Materialized View existence
+SELECT has_materialized_view('public', 'analytics_school_engagement', 'Materialized View should exist');
+
 -- 6. Finish
 SELECT * FROM finish();
 ROLLBACK;
