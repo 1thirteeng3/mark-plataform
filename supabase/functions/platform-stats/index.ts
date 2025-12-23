@@ -1,159 +1,62 @@
-// GET /platform-stats
-// Get global platform statistics
-// Response: { totalSchools, totalStudents, totalTransactions, totalMarksInCirculation }
+/**
+ * GET /platform-stats
+ * Get global platform statistics
+ * 
+ * Required Role: SUPER_ADMIN or ADMIN
+ * Response: { totalSchools, totalStudents, totalTransactions, totalMarksInCirculation }
+ */
 
-// SHARED HELPER: Inlined for manual deployment compatibility
-async function validateAdminToken(token: string): Promise<{
-    valid: boolean;
-    payload?: {
-        userId: string;
-        email: string;
-        role: string;
-        schoolId: string;
-        exp: number;
-    };
-}> {
-    try {
-        const parts = token.split('.');
-        if (parts.length !== 3) return { valid: false };
-        const [headerB64, payloadB64, signatureB64] = parts;
-        const payload = JSON.parse(atob(payloadB64));
-        const now = Math.floor(Date.now() / 1000);
-        if (payload.exp && payload.exp < now) return { valid: false };
-        const jwtSecret = Deno.env.get('JWT_SECRET_V1') || 'mark-platform-secret-key-2024';
-        const expectedSignature = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecret);
-        if (expectedSignature !== signatureB64) {
-            const jwtSecretV2 = Deno.env.get('JWT_SECRET_V2');
-            if (jwtSecretV2) {
-                const expectedSignatureV2 = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecretV2);
-                if (expectedSignatureV2 !== signatureB64) return { valid: false };
-            } else {
-                return { valid: false };
-            }
-        }
-        if (payload.iss !== 'mark-platform') return { valid: false };
-        return {
-            valid: true,
-            payload: {
-                userId: payload.userId,
-                email: payload.email,
-                role: payload.role,
-                schoolId: payload.schoolId,
-                exp: payload.exp,
-            }
-        };
-    } catch (error) {
-        console.error('Token validation error:', error);
-        return { valid: false };
-    }
-}
-
-async function createHmacSignature(data: string, secret: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const dataBuffer = encoder.encode(data);
-    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const signature = await crypto.subtle.sign('HMAC', key, dataBuffer);
-    return btoa(String.fromCharCode(...new Uint8Array(signature)))
-        .replace(/=/g, '')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_');
-}
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        // Validate SUPER_ADMIN token
-        const authHeader = req.headers.get('x-user-token') || req.headers.get('authorization');
-        if (!authHeader) throw new Error('No authentication token provided');
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        const token = authHeader.replace('Bearer ', '');
-        const validation = await validateAdminToken(token);
+        const { payload } = authResult;
 
-        if (!validation.valid || !validation.payload || validation.payload.role !== 'SUPER_ADMIN') {
-            throw new Error('Invalid token or insufficient permissions');
-        }
+        // Check role (SUPER_ADMIN or ADMIN)
+        const roleError = requireRole(payload, ['SUPER_ADMIN', 'ADMIN']);
+        if (roleError) return roleError;
 
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
+        // Get counts using PostgREST count feature
+        const [schoolsRes, studentsRes, transactionsRes, balancesRes] = await Promise.all([
+            fetch(`${restUrl}/schools?select=count`, { headers: { ...headers, 'Prefer': 'count=exact' } }),
+            fetch(`${restUrl}/students?select=count`, { headers: { ...headers, 'Prefer': 'count=exact' } }),
+            fetch(`${restUrl}/ledger_transactions?select=count`, { headers: { ...headers, 'Prefer': 'count=exact' } }),
+            fetch(`${restUrl}/students?select=marks_balance`, { headers }),
+        ]);
 
-        const headers = {
-            'Authorization': `Bearer ${serviceRoleKey}`,
-            'apikey': serviceRoleKey,
-            'Content-Type': 'application/json'
-        };
+        // Parse counts from content-range header
+        const schoolsCount = parseInt(schoolsRes.headers.get('content-range')?.split('/')[1] || '0');
+        const studentsCount = parseInt(studentsRes.headers.get('content-range')?.split('/')[1] || '0');
+        const transactionsCount = parseInt(transactionsRes.headers.get('content-range')?.split('/')[1] || '0');
 
-        // Get total schools
-        const schoolsResponse = await fetch(`${supabaseUrl}/rest/v1/schools?select=count`, {
-            headers: { ...headers, 'Prefer': 'count=exact' }
-        });
-        const schoolsCount = parseInt(schoolsResponse.headers.get('content-range')?.split('/')[1] || '0');
-
-        // Get total students
-        const studentsResponse = await fetch(`${supabaseUrl}/rest/v1/students?select=count`, {
-            headers: { ...headers, 'Prefer': 'count=exact' }
-        });
-        const studentsCount = parseInt(studentsResponse.headers.get('content-range')?.split('/')[1] || '0');
-
-        // Get total transactions
-        const transactionsResponse = await fetch(`${supabaseUrl}/rest/v1/ledger_transactions?select=count`, {
-            headers: { ...headers, 'Prefer': 'count=exact' }
-        });
-        const transactionsCount = parseInt(transactionsResponse.headers.get('content-range')?.split('/')[1] || '0');
-
-        // Get total marks in circulation (sum of all student balances)
-        const balancesResponse = await fetch(`${supabaseUrl}/rest/v1/students?select=marks_balance`, {
-            headers
-        });
-
-        if (!balancesResponse.ok) {
-            console.error('Failed to fetch balances:', balancesResponse.status, balancesResponse.statusText);
-        }
-
-        const balances = await balancesResponse.json();
-
-        // Defensive check: ensure balances is an array
+        // Calculate total marks in circulation
+        const balances = await balancesRes.json();
         const totalMarksInCirculation = Array.isArray(balances)
-            ? balances.reduce((sum: number, student: any) => sum + (student.marks_balance || 0), 0)
+            ? balances.reduce((sum: number, s: { marks_balance: number }) => sum + (s.marks_balance || 0), 0)
             : 0;
 
-        return new Response(JSON.stringify({
+        return jsonResponse({
             totalSchools: schoolsCount,
             totalStudents: studentsCount,
             totalTransactions: transactionsCount,
-            totalMarksInCirculation
-        }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            totalMarksInCirculation,
+        }, req);
 
     } catch (error) {
-        console.error('Platform stats error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'STATS_FETCH_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: error.message.includes('permissions') ? 403 : 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[platform-stats] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

@@ -1,43 +1,35 @@
-// Authentication login endpoint
-// POST /auth-login
-// Body: { email: string, password: string }
-// Response: { token: string, user: { id, name, email, role, schoolId } }
+/**
+ * POST /auth-login
+ * Authenticate user and return JWT token
+ * 
+ * Body: { email: string, password: string }
+ * Response: { token: string, user: { id, name, email, role, schoolId } }
+ */
+
+import { SignJWT } from "https://deno.land/x/jose@v5.2.0/index.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
         const { email, password } = await req.json();
 
         if (!email || !password) {
-            throw new Error('Email and password are required');
+            return errorResponse('Email and password are required', req, 400);
         }
 
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
         // Query user by email
-        const userResponse = await fetch(`${supabaseUrl}/rest/v1/users?email=eq.${encodeURIComponent(email)}`, {
-            headers: {
-                'Authorization': `Bearer ${serviceRoleKey}`,
-                'apikey': serviceRoleKey,
-                'Content-Type': 'application/json'
-            }
-        });
+        const userResponse = await fetch(
+            `${restUrl}/users?email=eq.${encodeURIComponent(email)}`,
+            { headers }
+        );
 
         if (!userResponse.ok) {
             throw new Error('Database query failed');
@@ -46,86 +38,50 @@ Deno.serve(async (req) => {
         const users = await userResponse.json();
 
         if (!users || users.length === 0) {
-            return new Response(JSON.stringify({
-                error: {
-                    code: 'INVALID_CREDENTIALS',
-                    message: 'Invalid email or password'
-                }
-            }), {
-                status: 401,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
+            return errorResponse('Invalid email or password', req, 401);
         }
 
         const user = users[0];
 
-        // In production, verify password hash using bcrypt
-        // For demo, we'll skip actual password verification
-        // if (user.password_hash !== await hashPassword(password)) { ... }
+        // TODO: In production, verify password hash using bcrypt
+        // For demo, we skip actual password verification
+        // const isValid = await bcrypt.compare(password, user.password_hash);
 
-        // Create JWT token payload
-        const payload = {
-            iss: 'mark-platform',
+        // Get JWT secret
+        const jwtSecret = Deno.env.get('JWT_SECRET');
+        if (!jwtSecret) {
+            console.error('[auth-login] JWT_SECRET not configured');
+            throw new Error('Server configuration error');
+        }
+
+        // Create JWT token using jose library
+        const secret = new TextEncoder().encode(jwtSecret);
+
+        const token = await new SignJWT({
             userId: user.id,
             email: user.email,
             role: user.role,
             schoolId: user.school_id,
-            iat: Math.floor(Date.now() / 1000),
-            exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
-        };
+        })
+            .setProtectedHeader({ alg: 'HS256' })
+            .setIssuedAt()
+            .setIssuer('mark-platform')
+            .setExpirationTime('24h')
+            .sign(secret);
 
-        // Create REAL JWT token (HMAC-SHA256)
-        const header = { alg: 'HS256', typ: 'JWT' };
-        const encoder = new TextEncoder();
-
-        const headerB64 = btoa(JSON.stringify(header)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-        const payloadB64 = btoa(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-
-        const jwtSecret = Deno.env.get('JWT_SECRET_V1') || 'mark-platform-secret-key-2024';
-        const signatureB64 = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecret);
-
-        const token = `${headerB64}.${payloadB64}.${signatureB64}`;
-
-        return new Response(JSON.stringify({
+        return jsonResponse({
             token,
             user: {
                 id: user.id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                schoolId: user.school_id
-            }
-        }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+                schoolId: user.school_id,
+            },
+        }, req);
 
     } catch (error) {
-        console.error('Login error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'LOGIN_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[auth-login] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });
-
-// Helper for JWT Signing
-async function createHmacSignature(data: string, secret: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const dataBuffer = encoder.encode(data);
-    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const signature = await crypto.subtle.sign('HMAC', key, dataBuffer);
-    // Convert to URL-safe Base64
-    return btoa(String.fromCharCode(...new Uint8Array(signature)))
-        .replace(/=/g, '')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_');
-}
