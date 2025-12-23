@@ -1,67 +1,38 @@
-// Get student dashboard (balance and recent transactions)
-// GET /students-dashboard
-// Headers: Authorization: Bearer {token}
-// Response: { balance: number, transactions: [...] }
+/**
+ * GET /students-dashboard
+ * Get student dashboard (balance and recent transactions)
+ * 
+ * Required Role: STUDENT
+ * Response: { balance: number, transactions: [...] }
+ */
+
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        const authHeader = req.headers.get('x-user-token');
-        if (!authHeader) {
-            throw new Error('Authorization header is required');
-        }
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        // Extract and decode JWT token
-        const token = authHeader.replace('Bearer ', '');
-        const parts = token.split('.');
-        
-        if (parts.length < 2) {
-            throw new Error('Invalid token format');
-        }
+        const { payload } = authResult;
 
-        const payload = JSON.parse(atob(parts[1]));
+        // Check role (STUDENT required)
+        const roleError = requireRole(payload, ['STUDENT']);
+        if (roleError) return roleError;
 
-        // Verify role is STUDENT
-        if (payload.role !== 'STUDENT') {
-            return new Response(JSON.stringify({
-                error: {
-                    code: 'FORBIDDEN',
-                    message: 'Only students can access their dashboard'
-                }
-            }), {
-                status: 403,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-        }
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
-
-        // Get student record by user_id
+        // Get student record
         const studentResponse = await fetch(
-            `${supabaseUrl}/rest/v1/students?user_id=eq.${payload.userId}`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${serviceRoleKey}`,
-                    'apikey': serviceRoleKey,
-                    'Content-Type': 'application/json'
-                }
-            }
+            `${restUrl}/students?user_id=eq.${payload.userId}`,
+            { headers }
         );
 
         if (!studentResponse.ok) {
@@ -71,58 +42,39 @@ Deno.serve(async (req) => {
         const students = await studentResponse.json();
 
         if (!students || students.length === 0) {
-            throw new Error('Student record not found');
+            return errorResponse('Student record not found', req, 404);
         }
 
         const student = students[0];
 
-        // Get recent transactions (last 20)
-        const transactionsResponse = await fetch(
-            `${supabaseUrl}/rest/v1/ledger_transactions?student_id=eq.${student.id}&order=created_at.desc&limit=20`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${serviceRoleKey}`,
-                    'apikey': serviceRoleKey,
-                    'Content-Type': 'application/json'
-                }
-            }
+        // Get recent transactions
+        const txnResponse = await fetch(
+            `${restUrl}/ledger_transactions?student_id=eq.${student.id}&order=created_at.desc&limit=20`,
+            { headers }
         );
 
-        if (!transactionsResponse.ok) {
+        if (!txnResponse.ok) {
             throw new Error('Failed to fetch transactions');
         }
 
-        const transactions = await transactionsResponse.json();
+        const transactions = await txnResponse.json();
 
-        // Convert to camelCase format
-        const formattedTransactions = transactions.map(tx => ({
+        // Format transactions
+        const formattedTransactions = transactions.map((tx: any) => ({
             id: tx.id,
             type: tx.type,
             amount: tx.amount,
             description: tx.description,
-            createdAt: tx.created_at
+            createdAt: tx.created_at,
         }));
 
-        return new Response(JSON.stringify({
+        return jsonResponse({
             balance: student.marks_balance,
-            transactions: formattedTransactions
-        }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            transactions: formattedTransactions,
+        }, req);
 
     } catch (error) {
-        console.error('Dashboard error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'DASHBOARD_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[students-dashboard] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

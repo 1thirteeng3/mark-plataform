@@ -1,109 +1,70 @@
-// GET /student-redemptions
-// Get student's voucher redemption history
-// Response: [{ id, voucherName, voucherCode, marksCost, redeemedAt, status }]
+/**
+ * GET /student-redemptions
+ * Get student's voucher redemption history
+ * 
+ * Required Role: STUDENT
+ * Response: [{ id, voucherName, voucherCode, marksCost, redeemedAt, status }]
+ */
 
-function validateStudentToken(req: Request): { userId: string; role: string; schoolId: string | null } {
-    const token = req.headers.get('x-user-token');
-    if (!token) throw new Error('No authentication token provided');
-    const parts = token.split('.');
-    if (parts.length !== 2 || parts[0] !== 'Bearer') throw new Error('Invalid token format');
-    try {
-        const payload = JSON.parse(atob(parts[1]));
-        const now = Math.floor(Date.now() / 1000);
-        if (payload.exp && payload.exp < now) throw new Error('Token expired');
-        if (payload.role !== 'STUDENT') throw new Error('Insufficient permissions - STUDENT access required');
-        return { userId: payload.userId, role: payload.role, schoolId: payload.schoolId || null };
-    } catch (error) {
-        throw new Error('Invalid token');
-    }
-}
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        // Validate STUDENT token
-        const { userId } = validateStudentToken(req);
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+        const { payload } = authResult;
 
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
+        // Check role (STUDENT required)
+        const roleError = requireRole(payload, ['STUDENT']);
+        if (roleError) return roleError;
 
-        const headers = {
-            'Authorization': `Bearer ${serviceRoleKey}`,
-            'apikey': serviceRoleKey,
-            'Content-Type': 'application/json'
-        };
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
-        // Get student ID from user ID
-        const studentsResponse = await fetch(
-            `${supabaseUrl}/rest/v1/students?user_id=eq.${userId}&select=id`,
-            { headers }
-        );
+        // Get student ID
+        const studentsRes = await fetch(`${restUrl}/students?user_id=eq.${payload.userId}&select=id`, { headers });
+        const students = await studentsRes.json();
 
-        if (!studentsResponse.ok) {
-            throw new Error('Failed to fetch student data');
-        }
-
-        const students = await studentsResponse.json();
         if (!students || students.length === 0) {
-            throw new Error('Student record not found');
+            return errorResponse('Student record not found', req, 404);
         }
 
         const studentId = students[0].id;
 
         // Fetch redemptions with voucher details
-        const redemptionsResponse = await fetch(
-            `${supabaseUrl}/rest/v1/redeemed_vouchers?student_id=eq.${studentId}&select=id,voucher_code,status,created_at,voucher_catalog!inner(name,marks_cost)&order=created_at.desc`,
+        const redemptionsRes = await fetch(
+            `${restUrl}/redeemed_vouchers?student_id=eq.${studentId}&select=id,voucher_code,status,created_at,voucher_catalog!inner(name,marks_cost)&order=created_at.desc`,
             { headers }
         );
 
-        if (!redemptionsResponse.ok) {
+        if (!redemptionsRes.ok) {
             throw new Error('Failed to fetch redemptions');
         }
 
-        const redemptions = await redemptionsResponse.json();
+        const redemptions = await redemptionsRes.json();
 
         // Transform to camelCase
-        const formattedRedemptions = redemptions.map((redemption: any) => ({
-            id: redemption.id,
-            voucherName: redemption.voucher_catalog.name,
-            voucherCode: redemption.voucher_code,
-            marksCost: redemption.voucher_catalog.marks_cost,
-            redeemedAt: redemption.created_at,
-            status: redemption.status
+        const formattedRedemptions = redemptions.map((r: any) => ({
+            id: r.id,
+            voucherName: r.voucher_catalog.name,
+            voucherCode: r.voucher_code,
+            marksCost: r.voucher_catalog.marks_cost,
+            redeemedAt: r.created_at,
+            status: r.status,
         }));
 
-        return new Response(JSON.stringify(formattedRedemptions), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return jsonResponse(formattedRedemptions, req);
 
     } catch (error) {
-        console.error('Student redemptions error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'REDEMPTIONS_FETCH_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: error.message.includes('permissions') ? 403 : 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[student-redemptions] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

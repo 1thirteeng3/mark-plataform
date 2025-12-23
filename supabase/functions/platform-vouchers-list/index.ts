@@ -1,108 +1,38 @@
-// GET /platform-vouchers
-// List all vouchers for management
-// Response: [{ id, name, description, marksCost, providerProductId, isAvailable, createdAt }]
+/**
+ * GET /platform-vouchers-list
+ * List all vouchers for management
+ * 
+ * Required Role: SUPER_ADMIN
+ * Response: [{ id, name, description, marksCost, providerProductId, isAvailable, createdAt }]
+ */
 
-// SHARED HELPER: Inlined for manual deployment compatibility
-async function validateAdminToken(token: string): Promise<{
-    valid: boolean;
-    payload?: {
-        userId: string;
-        email: string;
-        role: string;
-        schoolId: string;
-        exp: number;
-    };
-}> {
-    try {
-        const parts = token.split('.');
-        if (parts.length !== 3) return { valid: false };
-        const [headerB64, payloadB64, signatureB64] = parts;
-        const payload = JSON.parse(atob(payloadB64));
-        const now = Math.floor(Date.now() / 1000);
-        if (payload.exp && payload.exp < now) return { valid: false };
-        const jwtSecret = Deno.env.get('JWT_SECRET_V1') || 'mark-platform-secret-key-2024';
-        const expectedSignature = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecret);
-        if (expectedSignature !== signatureB64) {
-            const jwtSecretV2 = Deno.env.get('JWT_SECRET_V2');
-            if (jwtSecretV2) {
-                const expectedSignatureV2 = await createHmacSignature(`${headerB64}.${payloadB64}`, jwtSecretV2);
-                if (expectedSignatureV2 !== signatureB64) return { valid: false };
-            } else {
-                return { valid: false };
-            }
-        }
-        if (payload.iss !== 'mark-platform') return { valid: false };
-        return {
-            valid: true,
-            payload: {
-                userId: payload.userId,
-                email: payload.email,
-                role: payload.role,
-                schoolId: payload.schoolId,
-                exp: payload.exp,
-            }
-        };
-    } catch (error) {
-        console.error('Token validation error:', error);
-        return { valid: false };
-    }
-}
-
-async function createHmacSignature(data: string, secret: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const dataBuffer = encoder.encode(data);
-    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const signature = await crypto.subtle.sign('HMAC', key, dataBuffer);
-    return btoa(String.fromCharCode(...new Uint8Array(signature)))
-        .replace(/=/g, '')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_');
-}
-
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        // Validate SUPER_ADMIN token
-        const authHeader = req.headers.get('x-user-token') || req.headers.get('authorization');
-        if (!authHeader) throw new Error('No authentication token provided');
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        const token = authHeader.replace('Bearer ', '');
-        const validation = await validateAdminToken(token);
+        const { payload } = authResult;
 
-        if (!validation.valid || !validation.payload || validation.payload.role !== 'SUPER_ADMIN') {
-            throw new Error('Invalid token or insufficient permissions');
-        }
+        // Check role (SUPER_ADMIN required)
+        const roleError = requireRole(payload, ['SUPER_ADMIN']);
+        if (roleError) return roleError;
 
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
-
-        // Fetch all vouchers (including inactive)
+        // Fetch all vouchers
         const vouchersResponse = await fetch(
-            `${supabaseUrl}/rest/v1/voucher_catalog?select=*&order=created_at.desc`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${serviceRoleKey}`,
-                    'apikey': serviceRoleKey,
-                    'Content-Type': 'application/json'
-                }
-            }
+            `${restUrl}/voucher_catalog?select=*&order=created_at.desc`,
+            { headers }
         );
 
         if (!vouchersResponse.ok) {
@@ -112,33 +42,20 @@ Deno.serve(async (req) => {
         const vouchers = await vouchersResponse.json();
 
         // Transform to camelCase
-        const formattedVouchers = vouchers.map((voucher: any) => ({
-            id: voucher.id,
-            name: voucher.name,
-            description: voucher.description,
-            marksCost: voucher.marks_cost,
-            providerProductId: voucher.provider_product_id,
-            isAvailable: voucher.is_available,
-            createdAt: voucher.created_at
+        const formattedVouchers = vouchers.map((v: any) => ({
+            id: v.id,
+            name: v.name,
+            description: v.description,
+            marksCost: v.marks_cost,
+            providerProductId: v.provider_product_id,
+            isAvailable: v.is_available,
+            createdAt: v.created_at,
         }));
 
-        return new Response(JSON.stringify(formattedVouchers), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return jsonResponse(formattedVouchers, req);
 
     } catch (error) {
-        console.error('Platform vouchers list error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'VOUCHERS_FETCH_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: error.message.includes('permissions') ? 403 : 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[platform-vouchers-list] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

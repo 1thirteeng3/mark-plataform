@@ -1,74 +1,56 @@
-// PUT /platform-vouchers-update
-// Update an existing voucher
-// Body: { id, name, description, marksCost, providerProductId, isAvailable }
+/**
+ * PUT /platform-vouchers-update
+ * Update an existing voucher
+ * 
+ * Required Role: SUPER_ADMIN
+ * Body: { id, name?, description?, marksCost?, providerProductId?, isAvailable? }
+ * Response: { id, name, description, marksCost, providerProductId, isAvailable, updatedAt }
+ */
 
-function validateSuperAdminToken(req: Request): { userId: string; role: string; schoolId: string | null } {
-    const token = req.headers.get('x-user-token');
-    if (!token) throw new Error('No authentication token provided');
-    const parts = token.split('.');
-    if (parts.length !== 2 || parts[0] !== 'Bearer') throw new Error('Invalid token format');
-    try {
-        const payload = JSON.parse(atob(parts[1]));
-        const now = Math.floor(Date.now() / 1000);
-        if (payload.exp && payload.exp < now) throw new Error('Token expired');
-        if (payload.role !== 'SUPER_ADMIN') throw new Error('Insufficient permissions - SUPER_ADMIN access required');
-        return { userId: payload.userId, role: payload.role, schoolId: payload.schoolId || null };
-    } catch (error) {
-        throw new Error('Invalid token');
-    }
-}
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'PUT, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        // Validate SUPER_ADMIN token
-        validateSuperAdminToken(req);
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
+
+        const { payload } = authResult;
+
+        // Check role (SUPER_ADMIN required)
+        const roleError = requireRole(payload, ['SUPER_ADMIN']);
+        if (roleError) return roleError;
 
         const { id, name, description, marksCost, providerProductId, isAvailable } = await req.json();
 
         if (!id) {
-            throw new Error('Voucher ID is required');
+            return errorResponse('Voucher ID is required', req, 400);
         }
 
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
-
-        // Build update object with only provided fields
-        const updateData: any = {
-            updated_at: new Date().toISOString()
+        // Build update object
+        const updateData: Record<string, unknown> = {
+            updated_at: new Date().toISOString(),
         };
-
         if (name !== undefined) updateData.name = name;
         if (description !== undefined) updateData.description = description;
         if (marksCost !== undefined) updateData.marks_cost = marksCost;
         if (providerProductId !== undefined) updateData.provider_product_id = providerProductId;
         if (isAvailable !== undefined) updateData.is_available = isAvailable;
 
+        const restUrl = getRestUrl();
+        const headers = { ...getAdminHeaders(), 'Prefer': 'return=representation' };
+
         // Update voucher
-        const updateResponse = await fetch(`${supabaseUrl}/rest/v1/voucher_catalog?id=eq.${id}`, {
+        const updateResponse = await fetch(`${restUrl}/voucher_catalog?id=eq.${id}`, {
             method: 'PATCH',
-            headers: {
-                'Authorization': `Bearer ${serviceRoleKey}`,
-                'apikey': serviceRoleKey,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
-            },
-            body: JSON.stringify(updateData)
+            headers,
+            body: JSON.stringify(updateData),
         });
 
         if (!updateResponse.ok) {
@@ -78,37 +60,21 @@ Deno.serve(async (req) => {
         const voucher = (await updateResponse.json())[0];
 
         if (!voucher) {
-            throw new Error('Voucher not found');
+            return errorResponse('Voucher not found', req, 404);
         }
 
-        // Transform to camelCase
-        const formattedVoucher = {
+        return jsonResponse({
             id: voucher.id,
             name: voucher.name,
             description: voucher.description,
             marksCost: voucher.marks_cost,
             providerProductId: voucher.provider_product_id,
             isAvailable: voucher.is_available,
-            updatedAt: voucher.updated_at
-        };
-
-        return new Response(JSON.stringify(formattedVoucher), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            updatedAt: voucher.updated_at,
+        }, req);
 
     } catch (error) {
-        console.error('Platform voucher update error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'VOUCHER_UPDATE_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: error.message.includes('permissions') ? 403 : 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[platform-vouchers-update] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

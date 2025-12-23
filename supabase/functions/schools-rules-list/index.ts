@@ -1,67 +1,38 @@
-// List achievement rules for school
-// GET /schools-rules-list
-// Headers: Authorization: Bearer {token}
-// Response: [{ id, ruleName, marksToAward, isActive, createdAt }]
+/**
+ * GET /schools-rules-list
+ * List achievement rules for school
+ * 
+ * Required Role: ADMIN
+ * Response: [{ id, ruleName, marksToAward, isActive, createdAt }]
+ */
+
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        const authHeader = req.headers.get('x-user-token');
-        if (!authHeader) {
-            throw new Error('Authorization header is required');
-        }
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        // Extract and decode JWT token
-        const token = authHeader.replace('Bearer ', '');
-        const parts = token.split('.');
-        
-        if (parts.length < 2) {
-            throw new Error('Invalid token format');
-        }
+        const { payload } = authResult;
 
-        const payload = JSON.parse(atob(parts[1]));
+        // Check role (ADMIN required)
+        const roleError = requireRole(payload, ['ADMIN', 'SUPER_ADMIN']);
+        if (roleError) return roleError;
 
-        // Verify role is ADMIN
-        if (payload.role !== 'ADMIN') {
-            return new Response(JSON.stringify({
-                error: {
-                    code: 'FORBIDDEN',
-                    message: 'Only admins can access school rules'
-                }
-            }), {
-                status: 403,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-        }
-
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
         // Query rules for this school
         const rulesResponse = await fetch(
-            `${supabaseUrl}/rest/v1/school_rules?school_id=eq.${payload.schoolId}&order=created_at.desc`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${serviceRoleKey}`,
-                    'apikey': serviceRoleKey,
-                    'Content-Type': 'application/json'
-                }
-            }
+            `${restUrl}/school_rules?school_id=eq.${payload.schoolId}&order=created_at.desc`,
+            { headers }
         );
 
         if (!rulesResponse.ok) {
@@ -70,32 +41,19 @@ Deno.serve(async (req) => {
 
         const rules = await rulesResponse.json();
 
-        // Convert to camelCase format
-        const formattedRules = rules.map(rule => ({
-            id: rule.id,
-            ruleName: rule.rule_name,
-            marksToAward: rule.marks_to_award,
-            isActive: rule.is_active,
-            createdAt: rule.created_at
+        // Convert to camelCase
+        const formattedRules = rules.map((r: any) => ({
+            id: r.id,
+            ruleName: r.rule_name,
+            marksToAward: r.marks_to_award,
+            isActive: r.is_active,
+            createdAt: r.created_at,
         }));
 
-        return new Response(JSON.stringify(formattedRules), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return jsonResponse(formattedRules, req);
 
     } catch (error) {
-        console.error('List rules error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'RULES_LIST_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[schools-rules-list] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

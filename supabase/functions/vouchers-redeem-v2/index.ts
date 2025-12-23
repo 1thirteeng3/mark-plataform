@@ -1,78 +1,64 @@
-// deno-lint-ignore-file
-// Voucher Redemption V2 - Resilient Two-Phase Commit (2PC) + Reloadly Integration
-// Module 4: Resilient Integration
-// Orchestrates transactions across distributed systems (Database + External Providers)
+/**
+ * POST /vouchers-redeem-v2
+ * Voucher Redemption V2 - Resilient Two-Phase Commit (2PC) + Reloadly Integration
+ * 
+ * Required Role: STUDENT
+ * Body: { voucherId: string, forceFailure?: boolean }
+ * Response: { success: true, voucherCode: string }
+ */
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { headers: corsHeaders, status: 200 });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        const { voucherId, forceFailure } = await req.json(); // forceFailure for testing
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
+
+        const { payload } = authResult;
+
+        // Check role (STUDENT required)
+        const roleError = requireRole(payload, ['STUDENT']);
+        if (roleError) return roleError;
+
+        const { voucherId, forceFailure } = await req.json();
 
         if (!voucherId) {
-            return new Response(
-                JSON.stringify({ error: 'ID do voucher é obrigatório' }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-            );
+            return errorResponse('ID do voucher é obrigatório', req, 400);
         }
 
-        // --- 1. AUTHENTICATION & VALIDATION ---
-        const authHeader = req.headers.get('authorization');
-        if (!authHeader) {
-            return new Response(
-                JSON.stringify({ error: 'Token ausente' }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
-            );
-        }
-        const token = authHeader.replace('Bearer ', '');
-        const parts = token.split('.');
-        if (parts.length < 2) throw new Error("Invalid Token");
-        const payload = JSON.parse(atob(parts[1]));
-
-        if (payload.role !== 'STUDENT') {
-            return new Response(
-                JSON.stringify({ error: 'Apenas alunos podem resgatar vouchers' }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
-            );
-        }
-
-        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
         // Get Student ID
-        const studentRes = await fetch(`${supabaseUrl}/rest/v1/students?user_id=eq.${payload.userId}&select=id`, {
-            headers: { 'apikey': serviceKey, 'Authorization': `Bearer ${serviceKey}` }
-        });
+        const studentRes = await fetch(`${restUrl}/students?user_id=eq.${payload.userId}&select=id`, { headers });
         const students = await studentRes.json();
-        if (students.length === 0) throw new Error('Student not found');
+        if (students.length === 0) {
+            return errorResponse('Student not found', req, 404);
+        }
         const studentId = students[0].id;
 
-        // Get Voucher Details (Need provider_product_id)
-        const voucherRes = await fetch(`${supabaseUrl}/rest/v1/voucher_catalog?id=eq.${voucherId}&select=provider_product_id,name`, {
-            headers: { 'apikey': serviceKey, 'Authorization': `Bearer ${serviceKey}` }
-        });
+        // Get Voucher Details
+        const voucherRes = await fetch(`${restUrl}/voucher_catalog?id=eq.${voucherId}&select=provider_product_id,name`, { headers });
         const vouchers = await voucherRes.json();
-        if (vouchers.length === 0) throw new Error('Voucher not found');
+        if (vouchers.length === 0) {
+            return errorResponse('Voucher not found', req, 404);
+        }
         const voucher = vouchers[0];
 
-        // --- 2. PHASE 1: PREPARE (Reserve Funds) ---
+        // --- PHASE 1: PREPARE (Reserve Funds) ---
         console.log(`[2PC] Step 1: Preparing redemption for voucher ${voucherId}...`);
 
-        const prepareRes = await fetch(`${supabaseUrl}/rest/v1/rpc/prepare_redemption`, {
+        const prepareRes = await fetch(`${restUrl}/rpc/prepare_redemption`, {
             method: 'POST',
-            headers: { 'apikey': serviceKey, 'Authorization': `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ p_student_id: studentId, p_voucher_id: voucherId })
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ p_student_id: studentId, p_voucher_id: voucherId }),
         });
 
         if (!prepareRes.ok) {
@@ -82,16 +68,13 @@ Deno.serve(async (req) => {
 
         const prepareResult = await prepareRes.json();
         if (prepareResult.status === 'ERROR') {
-            return new Response(
-                JSON.stringify({ error: prepareResult.message }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-            );
+            return errorResponse(prepareResult.message, req, 400);
         }
 
         const redemptionId = prepareResult.redemption_id;
         console.log(`[2PC] Reservation successful. ID: ${redemptionId}`);
 
-        // --- 3. EXECUTE (External Provider) ---
+        // --- EXECUTE (External Provider) ---
         let externalRef = "";
         let secretCode = "";
 
@@ -99,87 +82,72 @@ Deno.serve(async (req) => {
             console.log(`[2PC] Step 2: Calling External Provider...`);
 
             if (forceFailure) {
-                // Testing Hook
                 throw new Error("Simulated External API Failure");
             }
 
-            // Check if we have Reloadly Secrets
             const clientId = Deno.env.get('RELOADLY_CLIENT_ID');
             const clientSecret = Deno.env.get('RELOADLY_CLIENT_SECRET');
 
             if (clientId && clientSecret && voucher.provider_product_id) {
-                // REAL RELOADLY INTEGRATION
                 const orderResult = await callReloadly(clientId, clientSecret, voucher.provider_product_id, redemptionId);
                 externalRef = orderResult.transactionId;
-                // Some vouchers give a PIN, some give a Link. We take what we can get.
                 secretCode = orderResult.pinDetail?.code || orderResult.pinDetail?.link || "RELOADLY-SENT-VIA-EMAIL";
             } else {
-                // SIMULATION MODE (Graceful degradation for Dev)
-                console.warn("Reloadly Secrets missing or Product ID missing. Using Simulation.");
+                console.warn("Reloadly Secrets missing. Using Simulation.");
                 await new Promise(r => setTimeout(r, 1000));
                 externalRef = `SIM-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
                 secretCode = `DEMO-CODE-${Math.random().toString(36).substr(2, 5)}`;
             }
 
-            // --- 4. PHASE 2: COMMIT (Confirm) ---
+            // --- PHASE 2: COMMIT ---
             console.log(`[2PC] Step 3: Confirming transaction...`);
 
-            await fetch(`${supabaseUrl}/rest/v1/rpc/confirm_redemption`, {
+            await fetch(`${restUrl}/rpc/confirm_redemption`, {
                 method: 'POST',
-                headers: { 'apikey': serviceKey, 'Authorization': `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ p_redemption_id: redemptionId, p_external_ref: externalRef })
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ p_redemption_id: redemptionId, p_external_ref: externalRef }),
             });
 
-            // Optional: Update Secret Code (if stored separately, or in 'voucher_code' column)
-            // Re-using the patch logic from original or just relying on database structure
-            // Assuming 'voucher_code' in redeemed_vouchers is where we store the PIN
-            await fetch(`${supabaseUrl}/rest/v1/redeemed_vouchers?id=eq.${redemptionId}`, {
+            await fetch(`${restUrl}/redeemed_vouchers?id=eq.${redemptionId}`, {
                 method: 'PATCH',
-                headers: { 'apikey': serviceKey, 'Authorization': `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ voucher_code: secretCode })
+                headers,
+                body: JSON.stringify({ voucher_code: secretCode }),
             });
 
-            return new Response(
-                JSON.stringify({
-                    success: true,
-                    message: 'Voucher resgatado com sucesso! (Confirmado)',
-                    voucherCode: secretCode
-                }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
-            );
+            return jsonResponse({
+                success: true,
+                message: 'Voucher resgatado com sucesso! (Confirmado)',
+                voucherCode: secretCode,
+            }, req);
 
         } catch (executionError) {
-            // --- 5. PHASE 2: ROLLBACK (Compensate) ---
+            // --- ROLLBACK ---
             console.error(`[2PC] Execution failed! Rolling back... Error: ${executionError.message}`);
 
-            await fetch(`${supabaseUrl}/rest/v1/rpc/rollback_redemption`, {
+            await fetch(`${restUrl}/rpc/rollback_redemption`, {
                 method: 'POST',
-                headers: { 'apikey': serviceKey, 'Authorization': `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ p_redemption_id: redemptionId, p_reason: executionError.message })
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ p_redemption_id: redemptionId, p_reason: executionError.message }),
             });
 
             return new Response(
                 JSON.stringify({
                     error: 'Falha na emissão do voucher. Seus marks foram estornados.',
                     details: executionError.message,
-                    status: 'ROLLBACK_EXECUTED'
+                    status: 'ROLLBACK_EXECUTED',
                 }),
-                { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502 }
+                { status: 502, headers: { 'Content-Type': 'application/json' } }
             );
         }
 
     } catch (error) {
-        console.error('Redemption Fatal Error:', error);
-        return new Response(
-            JSON.stringify({ error: 'Erro interno do servidor', details: error.message }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-        );
+        console.error('[vouchers-redeem-v2] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });
 
 // --- HELPER: RELOADLY API ---
 async function callReloadly(clientId: string, clientSecret: string, productId: string, refId: string) {
-    // 1. Get Access Token
     const env = Deno.env.get('RELOADLY_ENV') === 'LIVE' ? 'https://auth.reloadly.com' : 'https://auth-sandbox.reloadly.com';
     const apiBase = Deno.env.get('RELOADLY_ENV') === 'LIVE' ? 'https://giftcards.reloadly.com' : 'https://giftcards-sandbox.reloadly.com';
 
@@ -190,46 +158,38 @@ async function callReloadly(clientId: string, clientSecret: string, productId: s
             client_id: clientId,
             client_secret: clientSecret,
             grant_type: 'client_credentials',
-            audience: apiBase
-        })
+            audience: apiBase,
+        }),
     });
 
     if (!tokenRes.ok) {
-        const txt = await tokenRes.text();
-        throw new Error(`Reloadly Auth Failed: ${txt}`);
+        throw new Error(`Reloadly Auth Failed: ${await tokenRes.text()}`);
     }
-    const tokenData = await tokenRes.json();
-    const accessToken = tokenData.access_token;
+    const { access_token } = await tokenRes.json();
 
-    // 2. Place Order
-    console.log(`[Reloadly] Ordering Product ${productId}...`);
     const orderRes = await fetch(`${apiBase}/orders`, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
+            'Authorization': `Bearer ${access_token}`,
+            'Content-Type': 'application/json',
         },
         body: JSON.stringify({
             productId: parseInt(productId),
             quantity: 1,
-            unitPrice: 10, // TODO: In production, fetch dynamic price or map correctly. Hardcoded for MVP safety to verify connectivity.
+            unitPrice: 10,
             senderName: "Mark Platform",
-            recipientEmail: "demo@user.com", // In prod, use user.email
-            customIdentifier: refId
-        })
+            recipientEmail: "demo@user.com",
+            customIdentifier: refId,
+        }),
     });
 
     if (!orderRes.ok) {
-        const txt = await orderRes.text();
-        // If "Product not found", user needs to update catalog
-        throw new Error(`Reloadly Order Failed: ${txt}`);
+        throw new Error(`Reloadly Order Failed: ${await orderRes.text()}`);
     }
 
     const orderData = await orderRes.json();
-    console.log(`[Reloadly] Order Success: ${orderData.transactionId}`);
-
     return {
         transactionId: orderData.transactionId.toString(),
-        pinDetail: orderData.pinDetail // Contains code/link
+        pinDetail: orderData.pinDetail,
     };
 }

@@ -1,71 +1,62 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+/**
+ * GET /schools-students-list
+ * List students for a school
+ * 
+ * Required Role: ADMIN
+ * Response: { data: [...], meta: { page, limit, total } }
+ */
 
-const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-}
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getSupabaseAdmin } from "../_shared/supabaseAdmin.ts";
 
-serve(async (req) => {
-    if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders })
-    }
+Deno.serve(async (req) => {
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        const supabaseClient = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-        )
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        // 1. Validate User Token
-        const userToken = req.headers.get('x-user-token');
-        if (!userToken) throw new Error('User token required');
+        const { payload } = authResult;
 
-        const { data: { user }, error: userError } = await supabaseClient.auth.getUser(userToken);
-        if (userError || !user) throw new Error('Invalid user token');
+        // Check role (ADMIN required)
+        const roleError = requireRole(payload, ['ADMIN', 'SUPER_ADMIN']);
+        if (roleError) return roleError;
 
-        // 2. Verify Role (Must be ADMIN)
-        const { data: dbUser, error: roleError } = await supabaseClient
-            .from('users')
-            .select('role, school_id')
-            .eq('id', user.id)
-            .single();
-
-        if (roleError || !dbUser) throw new Error('User not found');
-        if (dbUser.role !== 'ADMIN') throw new Error('Unauthorized');
-
-        // 3. Parse Pagination
+        // Parse pagination
         const url = new URL(req.url);
-        const page = parseInt(url.searchParams.get('page') ?? '1');
-        const limit = parseInt(url.searchParams.get('limit') ?? '20');
+        const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
+        const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '20')));
         const offset = (page - 1) * limit;
 
-        // 4. Fetch Students (Scoped to School)
-        const { data: students, count, error: listError } = await supabaseClient
+        const supabase = getSupabaseAdmin();
+
+        // Fetch students scoped to school
+        const query = supabase
             .from('students')
             .select('*', { count: 'exact' })
-            .eq('school_id', dbUser.school_id)
             .range(offset, offset + limit - 1)
             .order('name', { ascending: true });
 
-        if (listError) throw listError;
+        // Scope to school if not SUPER_ADMIN
+        if (payload.role === 'ADMIN' && payload.schoolId) {
+            query.eq('school_id', payload.schoolId);
+        }
 
-        return new Response(
-            JSON.stringify({
-                data: students,
-                meta: {
-                    page,
-                    limit,
-                    total: count
-                }
-            }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        const { data: students, count, error } = await query;
+
+        if (error) throw error;
+
+        return jsonResponse({
+            data: students,
+            meta: { page, limit, total: count },
+        }, req);
 
     } catch (error) {
-        return new Response(
-            JSON.stringify({ error: { message: error.message } }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-        )
+        console.error('[schools-students-list] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
-})
+});

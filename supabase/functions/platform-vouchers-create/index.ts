@@ -1,69 +1,52 @@
-// POST /platform-vouchers-create
-// Create a new voucher
-// Body: { name, description, marksCost, providerProductId, isAvailable }
+/**
+ * POST /platform-vouchers-create
+ * Create a new voucher
+ * 
+ * Required Role: SUPER_ADMIN
+ * Body: { name, description, marksCost, providerProductId, isAvailable }
+ * Response: { id, name, description, marksCost, providerProductId, isAvailable, createdAt }
+ */
 
-function validateSuperAdminToken(req: Request): { userId: string; role: string; schoolId: string | null } {
-    const token = req.headers.get('x-user-token');
-    if (!token) throw new Error('No authentication token provided');
-    const parts = token.split('.');
-    if (parts.length !== 2 || parts[0] !== 'Bearer') throw new Error('Invalid token format');
-    try {
-        const payload = JSON.parse(atob(parts[1]));
-        const now = Math.floor(Date.now() / 1000);
-        if (payload.exp && payload.exp < now) throw new Error('Token expired');
-        if (payload.role !== 'SUPER_ADMIN') throw new Error('Insufficient permissions - SUPER_ADMIN access required');
-        return { userId: payload.userId, role: payload.role, schoolId: payload.schoolId || null };
-    } catch (error) {
-        throw new Error('Invalid token');
-    }
-}
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        // Validate SUPER_ADMIN token
-        validateSuperAdminToken(req);
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
+
+        const { payload } = authResult;
+
+        // Check role (SUPER_ADMIN required)
+        const roleError = requireRole(payload, ['SUPER_ADMIN']);
+        if (roleError) return roleError;
 
         const { name, description, marksCost, providerProductId, isAvailable } = await req.json();
 
         if (!name || !description || !marksCost || !providerProductId) {
-            throw new Error('Missing required fields');
+            return errorResponse('Missing required fields', req, 400);
         }
 
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
+        const restUrl = getRestUrl();
+        const headers = { ...getAdminHeaders(), 'Prefer': 'return=representation' };
 
         // Create voucher
-        const createResponse = await fetch(`${supabaseUrl}/rest/v1/voucher_catalog`, {
+        const createResponse = await fetch(`${restUrl}/voucher_catalog`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${serviceRoleKey}`,
-                'apikey': serviceRoleKey,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
-            },
+            headers,
             body: JSON.stringify({
                 name,
                 description,
                 marks_cost: marksCost,
                 provider_product_id: providerProductId,
-                is_available: isAvailable !== undefined ? isAvailable : true
-            })
+                is_available: isAvailable !== undefined ? isAvailable : true,
+            }),
         });
 
         if (!createResponse.ok) {
@@ -72,34 +55,18 @@ Deno.serve(async (req) => {
 
         const voucher = (await createResponse.json())[0];
 
-        // Transform to camelCase
-        const formattedVoucher = {
+        return jsonResponse({
             id: voucher.id,
             name: voucher.name,
             description: voucher.description,
             marksCost: voucher.marks_cost,
             providerProductId: voucher.provider_product_id,
             isAvailable: voucher.is_available,
-            createdAt: voucher.created_at
-        };
-
-        return new Response(JSON.stringify(formattedVoucher), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            createdAt: voucher.created_at,
+        }, req);
 
     } catch (error) {
-        console.error('Platform voucher create error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'VOUCHER_CREATE_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: error.message.includes('permissions') ? 403 : 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[platform-vouchers-create] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

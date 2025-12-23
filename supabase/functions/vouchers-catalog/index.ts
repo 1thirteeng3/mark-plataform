@@ -1,67 +1,38 @@
-// List available vouchers
-// GET /vouchers-catalog
-// Headers: Authorization: Bearer {token}
-// Response: [{ id, name, description, marksCost, isAvailable }]
+/**
+ * GET /vouchers-catalog
+ * List available vouchers for students
+ * 
+ * Required Role: STUDENT
+ * Response: [{ id, name, description, marksCost, isAvailable }]
+ */
+
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        const authHeader = req.headers.get('x-user-token');
-        if (!authHeader) {
-            throw new Error('Authorization header is required');
-        }
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        // Extract and decode JWT token
-        const token = authHeader.replace('Bearer ', '');
-        const parts = token.split('.');
-        
-        if (parts.length < 2) {
-            throw new Error('Invalid token format');
-        }
+        const { payload } = authResult;
 
-        const payload = JSON.parse(atob(parts[1]));
+        // Check role (STUDENT required)
+        const roleError = requireRole(payload, ['STUDENT']);
+        if (roleError) return roleError;
 
-        // Verify role is STUDENT
-        if (payload.role !== 'STUDENT') {
-            return new Response(JSON.stringify({
-                error: {
-                    code: 'FORBIDDEN',
-                    message: 'Only students can access voucher catalog'
-                }
-            }), {
-                status: 403,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-        }
-
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
         // Get available vouchers
         const vouchersResponse = await fetch(
-            `${supabaseUrl}/rest/v1/voucher_catalog?is_available=eq.true&order=marks_cost.asc`,
-            {
-                headers: {
-                    'Authorization': `Bearer ${serviceRoleKey}`,
-                    'apikey': serviceRoleKey,
-                    'Content-Type': 'application/json'
-                }
-            }
+            `${restUrl}/voucher_catalog?is_available=eq.true&order=marks_cost.asc`,
+            { headers }
         );
 
         if (!vouchersResponse.ok) {
@@ -70,33 +41,20 @@ Deno.serve(async (req) => {
 
         const vouchers = await vouchersResponse.json();
 
-        // Convert to camelCase format
-        const formattedVouchers = vouchers.map(voucher => ({
-            id: voucher.id,
-            name: voucher.name,
-            description: voucher.description,
-            marksCost: voucher.marks_cost,
-            providerProductId: voucher.provider_product_id,
-            isAvailable: voucher.is_available
+        // Convert to camelCase
+        const formattedVouchers = vouchers.map((v: any) => ({
+            id: v.id,
+            name: v.name,
+            description: v.description,
+            marksCost: v.marks_cost,
+            providerProductId: v.provider_product_id,
+            isAvailable: v.is_available,
         }));
 
-        return new Response(JSON.stringify(formattedVouchers), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return jsonResponse(formattedVouchers, req);
 
     } catch (error) {
-        console.error('Voucher catalog error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'CATALOG_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[vouchers-catalog] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

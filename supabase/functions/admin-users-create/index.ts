@@ -1,98 +1,88 @@
-// deno-lint-ignore-file
-// Super Admin: Create User
-// Logic: Wrapper around supabase.auth.admin.createUser to allow explicit password/role setting
+/**
+ * POST /admin-users-create
+ * Super Admin: Create new user (Admin or Student)
+ * 
+ * Required Role: SUPER_ADMIN
+ * Body: { email, password, role, schoolId, name, grade?, enrollmentId? }
+ * Response: { success, user: { id, email, role, schoolId } }
+ */
+
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getSupabaseAdmin } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        // 1. Verify Super Admin (via x-user-token or just Service Key if internal)
-        // For simplicity/security, we assume this is called with the Service Role key OR a valid Super Admin token
-        // But since we are creating users, we likely need the Service Role client anyway.
+        const { payload } = authResult;
 
-        // We check the Authorization header to ensure it's a valid request
-        const authHeader = req.headers.get('Authorization');
-        if (!authHeader) throw new Error('Missing Authorization');
-
-        // Create Supabase Client with Service Role (Admin Admin)
-        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-        const supabase = createClient(supabaseUrl, serviceKey);
+        // Check role (SUPER_ADMIN required)
+        const roleError = requireRole(payload, ['SUPER_ADMIN']);
+        if (roleError) return roleError;
 
         const { email, password, role, schoolId, name, grade, enrollmentId } = await req.json();
 
         if (!email || !password || !role || !schoolId || !name) {
-            return new Response(JSON.stringify({ error: 'Missing required fields' }), {
-                status: 400,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
+            return errorResponse('Missing required fields: email, password, role, schoolId, name', req, 400);
         }
 
-        // 2. Create Auth User
+        const supabase = getSupabaseAdmin();
+
+        // 1. Create Auth User
         const { data: userData, error: userError } = await supabase.auth.admin.createUser({
             email,
             password,
             email_confirm: true,
-            user_metadata: { role, schoolId } // Store role in metadata for easy access
+            user_metadata: { role, schoolId },
         });
 
         if (userError) throw userError;
 
         const userId = userData.user.id;
 
-        // 3. Create Database Record (using Service Role)
-
-        // A. Insert into public.users
+        // 2. Create Database Record in public.users
         const { error: dbError } = await supabase.from('users').insert({
             id: userId,
             email,
             name,
             role,
-            password_hash: 'MANAGED_BY_SUPABASE_AUTH', // We don't store the actual password hash here anymore, or we store a dummy
-            school_id: schoolId
+            password_hash: 'MANAGED_BY_SUPABASE_AUTH',
+            school_id: schoolId,
         });
 
         if (dbError) {
-            // Rollback Auth User if DB fails? 
-            // supabase.auth.admin.deleteUser(userId);
+            // Rollback auth user on DB failure
+            await supabase.auth.admin.deleteUser(userId);
             throw dbError;
         }
 
-        // B. If Student, insert into public.students
+        // 3. If Student, create student record
         if (role === 'STUDENT') {
             const { error: studentError } = await supabase.from('students').insert({
                 user_id: userId,
                 school_id: schoolId,
                 grade: grade || null,
                 enrollment_id: enrollmentId || null,
-                marks_balance: 0
+                marks_balance: 0,
             });
 
             if (studentError) throw studentError;
         }
 
-        return new Response(JSON.stringify({
+        return jsonResponse({
             success: true,
-            user: { id: userId, email, role, schoolId }
-        }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200
-        });
+            user: { id: userId, email, role, schoolId },
+        }, req);
 
     } catch (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 500
-        });
+        console.error('[admin-users-create] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });

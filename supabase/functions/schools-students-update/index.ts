@@ -1,56 +1,61 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+/**
+ * PUT /schools-students-update
+ * Update a student's profile
+ * 
+ * Required Role: ADMIN
+ * Body: { studentId, name?, email?, password? }
+ * Response: { success: true }
+ */
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-}
+import { requireAuth, requireRole } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getSupabaseAdmin } from "../_shared/supabaseAdmin.ts";
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+Deno.serve(async (req) => {
+  // Handle CORS preflight
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    // Authenticate user
+    const authResult = await requireAuth(req);
+    if (authResult instanceof Response) return authResult;
 
-    // 1. Auth & Role Check
-    const userToken = req.headers.get('x-user-token');
-    if (!userToken) throw new Error('User token required');
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(userToken);
-    if (userError || !user) throw new Error('Invalid user token');
+    const { payload } = authResult;
 
-    const { data: adminUser, error: roleError } = await supabaseClient
-      .from('users')
-      .select('role, school_id')
-      .eq('id', user.id)
-      .single();
+    // Check role (ADMIN required)
+    const roleError = requireRole(payload, ['ADMIN']);
+    if (roleError) return roleError;
 
-    if (roleError || !adminUser || adminUser.role !== 'ADMIN') throw new Error('Unauthorized');
-
-    // 2. Parse Input
     const { studentId, name, email, password } = await req.json();
-    if (!studentId) throw new Error('Student ID required');
 
-    // 3. Verify Ownership (Student belongs to School)
-    const { data: student, error: fetchError } = await supabaseClient
+    if (!studentId) {
+      return errorResponse('Student ID required', req, 400);
+    }
+
+    const supabase = getSupabaseAdmin();
+
+    // Verify student belongs to admin's school
+    const { data: student, error: fetchError } = await supabase
       .from('students')
       .select('user_id, school_id')
       .eq('id', studentId)
       .single();
 
-    if (fetchError || !student) throw new Error('Student not found');
-    if (student.school_id !== adminUser.school_id) throw new Error('Unauthorized access to this student');
+    if (fetchError || !student) {
+      return errorResponse('Student not found', req, 404);
+    }
 
-    const updates: any = {};
-    const authUpdates: any = {};
+    if (student.school_id !== payload.schoolId) {
+      return errorResponse('Unauthorized access to this student', req, 403);
+    }
+
+    const updates: Record<string, unknown> = {};
+    const authUpdates: Record<string, unknown> = {};
 
     if (name) {
       updates.name = name;
-      authUpdates.user_metadata = { ...authUpdates.user_metadata, name };
+      authUpdates.user_metadata = { name };
     }
     if (email) {
       updates.email = email;
@@ -60,40 +65,25 @@ serve(async (req) => {
       authUpdates.password = password;
     }
 
-    // 4. Update Database Record
+    // Update database records
     if (Object.keys(updates).length > 0) {
-      const { error: updateDbError } = await supabaseClient
-        .from('students')
-        .update(updates)
-        .eq('id', studentId);
-
-      if (updateDbError) throw updateDbError;
-
-      // Also update 'users' table public profile
-      await supabaseClient
-        .from('users')
-        .update(updates)
-        .eq('id', student.user_id);
+      await supabase.from('students').update(updates).eq('id', studentId);
+      await supabase.from('users').update(updates).eq('id', student.user_id);
     }
 
-    // 5. Update Auth User (if email/password/metadata changed)
+    // Update Auth user
     if (Object.keys(authUpdates).length > 0) {
-      const { error: updateAuthError } = await supabaseClient.auth.admin.updateUserById(
+      const { error: authError } = await supabase.auth.admin.updateUserById(
         student.user_id,
         authUpdates
       );
-      if (updateAuthError) throw updateAuthError;
+      if (authError) throw authError;
     }
 
-    return new Response(
-      JSON.stringify({ success: true, message: 'Student updated successfully' }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    return jsonResponse({ success: true, message: 'Student updated successfully' }, req);
 
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: { message: error.message } }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-    )
+    console.error('[schools-students-update] Error:', error);
+    return errorResponse(error.message, req, 500);
   }
-})
+});

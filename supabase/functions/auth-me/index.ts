@@ -1,65 +1,35 @@
-// Get current user profile
-// GET /auth-me
-// Headers: Authorization: Bearer {token}
-// Response: { id, name, email, role, schoolId }
+/**
+ * GET /auth-me
+ * Get current authenticated user profile
+ * 
+ * Headers: Authorization: Bearer {token}
+ * Response: { id, name, email, role, schoolId }
+ */
+
+import { requireAuth } from "../_shared/auth.ts";
+import { handleCors, jsonResponse, errorResponse } from "../_shared/cors.ts";
+import { getAdminHeaders, getRestUrl } from "../_shared/supabaseAdmin.ts";
 
 Deno.serve(async (req) => {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-token',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Max-Age': '86400',
-        'Access-Control-Allow-Credentials': 'false'
-    };
-
-    if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 200, headers: corsHeaders });
-    }
+    // Handle CORS preflight
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
 
     try {
-        const authHeader = req.headers.get('x-user-token');
-        if (!authHeader) {
-            throw new Error('Authorization header is required');
-        }
+        // Authenticate user
+        const authResult = await requireAuth(req);
+        if (authResult instanceof Response) return authResult;
 
-        // Extract and decode JWT token
-        const token = authHeader.replace('Bearer ', '');
-        const parts = token.split('.');
-        
-        if (parts.length < 2) {
-            throw new Error('Invalid token format');
-        }
+        const { payload } = authResult;
 
-        const payload = JSON.parse(atob(parts[1]));
+        const restUrl = getRestUrl();
+        const headers = getAdminHeaders();
 
-        // Verify token expiration
-        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-            return new Response(JSON.stringify({
-                error: {
-                    code: 'TOKEN_EXPIRED',
-                    message: 'Token has expired'
-                }
-            }), {
-                status: 401,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
-        }
-
-        const supabaseUrl = Deno.env.get('SUPABASE_URL');
-        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-        if (!supabaseUrl || !serviceRoleKey) {
-            throw new Error('Supabase configuration missing');
-        }
-
-        // Query user by ID
-        const userResponse = await fetch(`${supabaseUrl}/rest/v1/users?id=eq.${payload.userId}`, {
-            headers: {
-                'Authorization': `Bearer ${serviceRoleKey}`,
-                'apikey': serviceRoleKey,
-                'Content-Type': 'application/json'
-            }
-        });
+        // Query user by ID from token
+        const userResponse = await fetch(
+            `${restUrl}/users?id=eq.${payload.userId}`,
+            { headers }
+        );
 
         if (!userResponse.ok) {
             throw new Error('Database query failed');
@@ -68,42 +38,21 @@ Deno.serve(async (req) => {
         const users = await userResponse.json();
 
         if (!users || users.length === 0) {
-            return new Response(JSON.stringify({
-                error: {
-                    code: 'USER_NOT_FOUND',
-                    message: 'User not found'
-                }
-            }), {
-                status: 404,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-            });
+            return errorResponse('User not found', req, 404);
         }
 
         const user = users[0];
 
-        return new Response(JSON.stringify({
+        return jsonResponse({
             id: user.id,
             name: user.name,
             email: user.email,
             role: user.role,
-            schoolId: user.school_id
-        }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+            schoolId: user.school_id,
+        }, req);
 
     } catch (error) {
-        console.error('Auth me error:', error);
-
-        const errorResponse = {
-            error: {
-                code: 'AUTH_FAILED',
-                message: error.message
-            }
-        };
-
-        return new Response(JSON.stringify(errorResponse), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        console.error('[auth-me] Error:', error);
+        return errorResponse(error.message, req, 500);
     }
 });
